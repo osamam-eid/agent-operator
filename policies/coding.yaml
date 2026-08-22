@@ -1,7 +1,7 @@
 schemaVersion: "1.0"
-id: masar
+id: coding
 version: 1
-description: Bounded scope-freeze governance for planning and implementation work, forcing a human decision instead of an open-ended review loop.
+description: Bounded scope-freeze governance for coding work (planning and implementation), forcing a human decision instead of an open-ended review loop.
 appliesTo:
   - PLAN
   - IMPLEMENT

@@ -53,32 +53,34 @@ An offline, promotion-recommendation-only subsystem:
 
 ## Install
 
-Copy the package into the OMP extensions directory (OMP loads `extensions/<name>/index.ts`):
-
 ```bash
-rsync -a --exclude '.git' --exclude 'node_modules' --exclude '.DS_Store' \
-  <this-repo>/ ~/.omp/agent/extensions/agent-operator/
+git clone https://github.com/osamam-eid/agent-operator.git
+cd agent-operator
+./install.sh
 ```
 
-Then restart OMP. Requires Bun + TypeScript peer `@oh-my-pi/pi-coding-agent` (17.3.x).
+Then restart OMP. Type `/operator` and press space for the command menu.
 
-## Development
+## Architecture
 
-```bash
-bun install
-bun run typecheck   # tsc --noEmit
-bun test            # full suite
-bun run hash-bundle .   # canonical integrity digest (sha256-length-prefixed-v1)
-```
-
-## Layout
-
-```
-extension/   OMP activation + registration (the only SDK-coupled module)
-src/         classifier, compiler, policy engine, graph, runtime, adapters, evaluator
-schemas/     JSON schemas for operator artifacts
-policies/    frozen policy packs
-tests/       500+ tests incl. adversarial/security suites
+```mermaid
+flowchart TD
+    A["/operator <request>"] --> B["Classifier<br/>family + risk + shape"]
+    B --> C["Policy Engine<br/>frozen packs · budget · ceilings"]
+    C --> D["Compiler<br/>deterministic workflow graph"]
+    D --> E["Validator<br/>DAG · synthesis · verification ownership"]
+    E --> F["Execution Coordinator<br/>barriers · concurrency · timeouts"]
+    F --> G["Governed Adapters<br/>omp-task · external-cli (explicit only)"]
+    G --> H{"Human Gates<br/>PLAN / EXECUTION / RESULT / PUBLICATION"}
+    H -- approve --> F
+    H -- reject/cancel --> I["Truthful Terminal Result<br/>done · not-done · evidence · next action"]
+    F --> S["Synthesis<br/>operator-owned, single terminal"]
+    S --> I
+    subgraph "Offline Evaluator"
+        J["harvest → corpus<br/>(train/held-out, leakage-capped)"] --> K["evaluate<br/>baseline + trusted candidate"]
+        K --> L["compare<br/>trusted envelopes only"]
+    end
+    L -. promotion recommendation only .-> I
 ```
 
 ## Status
