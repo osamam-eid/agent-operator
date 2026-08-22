@@ -20,4 +20,5 @@ if (entries.length === 0) {
 const catalogPath = fleetCatalogPath();
 const merged = mergeCatalog(loadCatalogFile(catalogPath), bootstrapCatalog(entries));
 saveCatalogFile(catalogPath, merged);
-console.log(`fleet catalog at ${catalogPath}: added ${merged.added.length} provider(s)${merged.added.length > 0 ? ` (${merged.added.join(', ')})` : ''}; total ${merged.providers.length}.`);
+void catalogPath;
+console.log(`fleet catalog: added ${merged.added.length} provider(s)${merged.added.length > 0 ? ` (${merged.added.join(', ')})` : ''}; total ${merged.providers.length}.`);
