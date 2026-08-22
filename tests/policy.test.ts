@@ -295,8 +295,8 @@ describe('loadPolicyPacks', () => {
   });
 
   test('loads all four bundled production packs from DEFAULT_POLICIES_DIR', async () => {
-    const packs = await loadPolicyPacks(['default', 'secure-code', 'masar', 'qa'], DEFAULT_POLICIES_DIR);
-    expect(packs.map((pack) => pack.id)).toEqual(['default', 'secure-code', 'masar', 'qa']);
+    const packs = await loadPolicyPacks(['default', 'secure-code', 'coding', 'qa'], DEFAULT_POLICIES_DIR);
+    expect(packs.map((pack) => pack.id)).toEqual(['default', 'secure-code', 'coding', 'qa']);
     for (const pack of packs) {
       expect(pack.schemaVersion).toBe('1.0');
       expect(pack.version).toBeGreaterThanOrEqual(1);
@@ -305,8 +305,8 @@ describe('loadPolicyPacks', () => {
     const secureCode = packs.find((pack) => pack.id === 'secure-code');
     expect(secureCode?.rules.requireIndependentReview).toBe(true);
     expect(secureCode?.rules.requireAdversarialReview).toBe(true);
-    const masar = packs.find((pack) => pack.id === 'masar');
-    expect(masar?.rules.requireScopeFreeze).toBe(true);
+    const coding = packs.find((pack) => pack.id === 'coding');
+    expect(coding?.rules.requireScopeFreeze).toBe(true);
     const qa = packs.find((pack) => pack.id === 'qa');
     expect(qa?.rules.maximumMutationClass).toBe('READ_ONLY');
   });
@@ -612,14 +612,14 @@ describe('resolvePolicy: budget-profile enforcement', () => {
   });
 });
 
-describe('resolvePolicy: MASAR scope freeze pack', () => {
+describe('resolvePolicy: coding scope-freeze pack', () => {
   test('forces scope freeze, human final approval, independent review, and a bounded round cap', async () => {
-    const [masar] = await loadPolicyPacks(['masar'], DEFAULT_POLICIES_DIR);
-    if (masar === undefined) throw new Error('masar pack failed to load');
+    const [coding] = await loadPolicyPacks(['coding'], DEFAULT_POLICIES_DIR);
+    if (coding === undefined) throw new Error('coding pack failed to load');
     const classification = makeClassification({ requestClassification: 'PLAN', riskClassification: 'MEDIUM' });
     const config = makeConfig();
 
-    const resolved = resolvePolicy(classification, config, [masar], { now: NOW });
+    const resolved = resolvePolicy(classification, config, [coding], { now: NOW });
 
     expect(resolved.effectiveRules.scopeFreezeRequired).toBe(true);
     expect(resolved.effectiveRules.humanIsFinalApprover).toBe(true);
@@ -678,7 +678,7 @@ describe('resolvePolicy: QA pack', () => {
 
 describe('resolvePolicy: the bundled production packs never conflict with each other', () => {
   test('loading and resolving all four together succeeds for every task family they jointly apply to', async () => {
-    const allPacks = await loadPolicyPacks(['default', 'secure-code', 'masar', 'qa'], DEFAULT_POLICIES_DIR);
+    const allPacks = await loadPolicyPacks(['default', 'secure-code', 'coding', 'qa'], DEFAULT_POLICIES_DIR);
     for (const family of ['PLAN', 'IMPLEMENT', 'REVIEW', 'QA', 'SECURITY', 'DIRECT'] as const) {
       const resolved = resolvePolicy(makeClassification({ requestClassification: family }), makeConfig(), allPacks, { now: NOW });
       assertWellFormedDecisions(resolved.decisions);
