@@ -82,7 +82,3 @@ flowchart TD
     end
     L -. promotion recommendation only .-> I
 ```
-
-## Status
-
-v1.0.0 — qualified through an 11-stage governed program (frozen contract stages → evaluator subsystem → full-system qualification with a 7-slice evidence matrix). See `SKILL.md` for the operator skill contract.
