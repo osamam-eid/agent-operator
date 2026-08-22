@@ -721,26 +721,64 @@ export class OperatorRuntime {
     }
     if (subcommand === 'combo') {
       const name = args[0];
-      if (name === undefined) {
+      const readCombos = (): Record<string, { providers: string[]; purpose?: string }> => {
         const combosPath = join(dirname(catalogPath), 'combos.json');
-        if (!existsSync(combosPath)) return { ok: true, text: 'No fleet combos defined. Usage: /operator fleet combo <name> <provider1> [provider2 ...] — e.g. council roster for /operator --shape council.' };
-        const combos = JSON.parse(readFileSync(combosPath, 'utf8')) as Record<string, string[]>;
-        const lines = Object.entries(combos).map(([comboName, providers]) => `- ${comboName}: ${providers.join(', ')}`);
-        return { ok: true, text: `Fleet combos:\n${lines.join('\n')}` };
+        if (!existsSync(combosPath)) return {};
+        const raw = JSON.parse(readFileSync(combosPath, 'utf8')) as Record<string, string[] | { providers: string[]; purpose?: string }>;
+        return Object.fromEntries(Object.entries(raw).map(([key, value]) => [key, Array.isArray(value) ? { providers: value } : value]));
+      };
+      const writeCombos = (combos: Record<string, { providers: string[]; purpose?: string }>): void => {
+        const combosPath = join(dirname(catalogPath), 'combos.json');
+        mkdirSync(dirname(combosPath), { recursive: true, mode: 0o700 });
+        writeFileSync(combosPath, JSON.stringify(combos, null, 2), { mode: 0o600 });
+      };
+
+      // `/operator fleet combo` — guided overview + saved rosters.
+      if (name === undefined) {
+        const saved = readCombos();
+        const comboLines = Object.entries(saved).map(([comboName, entry]) => `- ${comboName}: ${entry.providers.join(', ')}${entry.purpose !== undefined ? ` — ${entry.purpose}` : ''}`);
+        return {
+          ok: true,
+          text: [
+            'Fleet combos — guided:',
+            '  1. Type `/operator fleet combo` + space → pick a roster name (council = used by council.v1 debates)',
+            '  2. Space again → arrow-pick providers; each pick extends the line, picked ones drop off',
+            '  3. Enter to save',
+            '  4. `/operator fleet combo describe <name> <what it is for>` records its purpose',
+            '',
+            ...(comboLines.length > 0 ? ['Saved rosters:', ...comboLines] : ['No saved rosters yet.']),
+            '',
+            'Run a council afterwards with: /operator research … council   (the word "council" triggers the COUNCIL shape).',
+          ].join('\n'),
+        };
       }
+
+      // `/operator fleet combo describe <name> <purpose…>` — record intent.
+      if (name === 'describe') {
+        const target = args[1];
+        const purpose = args.slice(2).join(' ').trim();
+        if (target === undefined || purpose.length === 0) return { ok: false, text: 'usage: /operator fleet combo describe <name> <what it is for>', errorCode: 'INVALID_COMMAND' };
+        const saved = readCombos();
+        const entry = saved[target];
+        if (entry === undefined) return { ok: false, text: `Combo "${target}" does not exist yet; create it first with /operator fleet combo ${target} <provider…>.`, errorCode: 'INVALID_COMMAND' };
+        saved[target] = { ...entry, purpose };
+        writeCombos(saved);
+        return { ok: true, text: `Purpose of "${target}" recorded: ${purpose}` };
+      }
+
+      // `/operator fleet combo <name> <provider…>` — create/extend roster.
       const providers = args.slice(1);
-      if (providers.length === 0) return { ok: false, text: 'usage: /operator fleet combo <name> <provider1> [provider2 ...]', errorCode: 'INVALID_COMMAND' };
+      if (providers.length === 0) return { ok: false, text: 'usage: /operator fleet combo <name> <provider1> [provider2 ...] | describe <name> <purpose>', errorCode: 'INVALID_COMMAND' };
       const catalog = loadCatalogFile(catalogPath);
       if (catalog === undefined) return { ok: false, text: 'No fleet catalog; run `/operator fleet bootstrap` first.', errorCode: 'INVALID_COMMAND' };
       const known = new Set(catalog.providers.map((entry) => String(entry['providerId'])));
       const unknown = providers.filter((entry) => !known.has(entry));
       if (unknown.length > 0) return { ok: false, text: `Unknown provider id(s): ${unknown.join(', ')}.`, errorCode: 'INVALID_COMMAND' };
-      const combosPath = join(dirname(catalogPath), 'combos.json');
-      const combos = existsSync(combosPath) ? JSON.parse(readFileSync(combosPath, 'utf8')) as Record<string, string[]> : {};
-      combos[name] = [...new Set(providers)];
-      mkdirSync(dirname(combosPath), { recursive: true, mode: 0o700 });
-      writeFileSync(combosPath, JSON.stringify(combos, null, 2), { mode: 0o600 });
-      return { ok: true, text: `Combo "${name}" set to: ${combos[name].join(', ')}.` };
+      const saved = readCombos();
+      const previous = saved[name];
+      saved[name] = { providers: [...new Set(providers)], ...(previous?.purpose !== undefined ? { purpose: previous.purpose } : {}) };
+      writeCombos(saved);
+      return { ok: true, text: `Combo "${name}" saved: ${saved[name].providers.join(', ')}.${previous?.purpose !== undefined ? ` Purpose: ${previous.purpose}` : ''} Add more by re-running with additional providers; run a council via /operator research … council.` };
     }
     if (subcommand === 'remove') {
       const target = args[0];
@@ -753,6 +791,9 @@ export class OperatorRuntime {
       return { ok: true, text: `Removed "${target}". ${remaining.length} provider(s) remain.` };
     }
     const catalog = loadCatalogFile(catalogPath);
+    if (subcommand === 'combo' && (catalog === undefined || catalog.providers.length === 0)) {
+      return { ok: true, text: 'No catalog yet. Run `/operator fleet bootstrap` first, then `/operator fleet combo council <provider…>` — or type `fleet combo` + space and pick from the suggestions.' };
+    }
     if (catalog === undefined || catalog.providers.length === 0) {
       return { ok: true, text: 'Fleet catalog is empty or absent. Run `/operator fleet bootstrap` to project your OMP providers into it.' };
     }

@@ -189,14 +189,18 @@ export function createMockOperatorClassifier(): OperatorClassifier {
 
       const family = top.family;
       const confidence = topCount >= 2 ? 'HIGH' : 'MEDIUM';
+      // Explicit multi-model intent: the word "council" upgrades a RESEARCH
+      // request to the COUNCIL shape (council.v1). Other families fail
+      // closed at template selection rather than silently reshaping.
+      const wantsCouncil = family === 'RESEARCH' && /\bcouncil\b/i.test(normalized);
       return {
         requestClassification: family,
         riskClassification: RISK_BY_FAMILY[family],
         confidence,
         decomposable: true,
         semanticCapabilities: CAPABILITIES_BY_FAMILY[family],
-        requestedExecutionShape: SHAPE_BY_FAMILY[family],
-        rationale: `Matched ${family} keyword phrase(s): ${top.matched.join(', ')}.`,
+        requestedExecutionShape: wantsCouncil ? 'COUNCIL' : SHAPE_BY_FAMILY[family],
+        rationale: `Matched ${family} keyword phrase(s): ${top.matched.join(', ')}.${wantsCouncil ? ' Explicit council intent detected; COUNCIL shape requested.' : ''}`,
       };
     },
   };

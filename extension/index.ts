@@ -41,9 +41,9 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import {
   AgentRegistry,
@@ -70,6 +70,7 @@ import { createOmpSdkSessionFactory, createOmpTaskAdapter, type OmpCustomToolDef
 import { createStage3WorkflowCompiler } from '../src/compiler.js';
 import type { CapabilityRequirement, CapabilitySelection } from '../src/stage3-types.js';
 import { resolveProviderCatalogPath } from '../src/config.js';
+import { loadCatalogFile as loadFleetCatalog } from '../src/fleet-catalog.js';
 import { createExternalCliAdapter } from '../src/adapters/external-cli.js';
 import { createEvaluatorHandler } from '../src/evaluator/service.js';
 import { normalizeProviderCatalog, normalizedProviderToCapabilityRecord, selectProviderRecord, type ProviderCatalog, type ProviderPreferencePolicy } from '../src/provider-fleet.js';
@@ -259,7 +260,7 @@ function createProductionHostSdk(deps: { readonly providerSessionRoot: string })
   };
 }
 
-const COMMAND_DESCRIPTION = 'Governed multi-stage workflow controller: run requests through classified, gate-checked workflows. Bare `/operator` lists all subcommands.';
+const COMMAND_DESCRIPTION = 'Governed workflow controller v1.0.0 — classified, gate-checked workflows. Bare `/operator` lists all subcommands.';
 
 /** OMP command-picker suggestions while the first argument is being typed
  * (same interaction as /coach): arrow-navigable labels with descriptions. */
@@ -286,19 +287,73 @@ const FLEET_SUBCOMMANDS: ReadonlyArray<{ label: string; description: string; hin
   { label: 'combo', description: 'Define a provider combo (e.g. your council roster)', hint: '<name> <provider1> [provider2 ...]' },
 ];
 
-function completeOperatorSubcommand(argumentPrefix: string): Array<{ value: string; label: string; description: string; hint?: string }> | null {
+function __logCompletion(prefix: string): void {
+  try {
+    appendFileSync('/tmp/op-completions.log', `${JSON.stringify(prefix)}\n`);
+  } catch { /* diagnostics must never break the UI */ }
+}
+
+export function completeOperatorSubcommand(argumentPrefix: string): Array<{ value: string; label: string; description: string; hint?: string }> | null {
+  __logCompletion(argumentPrefix);
   const tokens = argumentPrefix.trim().split(/\s+/).filter((token) => token.length > 0);
-  if (tokens[0]?.toLowerCase() === 'fleet') {
-    if (tokens.length === 1 && !argumentPrefix.endsWith(' ')) {
-      const matches = FLEET_SUBCOMMANDS.filter((item) => item.label.startsWith(tokens[1] ?? '') === false && (tokens[1] ?? '').length === 0 || item.label.startsWith(tokens[1] ?? ''));
-      return matches.map((item) => ({ ...item, value: item.label }));
-    }
-    return null;
+  const endsWithSpace = /\s$/.test(argumentPrefix);
+  const partial = endsWithSpace ? '' : (tokens[tokens.length - 1] ?? '').toLowerCase();
+
+  // Top level: `/operator`, `/operator s…` — the original working menu.
+  if (tokens[0]?.toLowerCase() !== 'fleet') {
+    if (tokens.length > 1) return null;
+    const matches = OPERATOR_SUBCOMMANDS.filter((item) => item.label.startsWith(partial));
+    return matches.map((item) => ({ ...item, value: item.label }));
   }
-  if (argumentPrefix.includes(' ')) return null;
-  const lower = argumentPrefix.trim().toLowerCase();
-  const matches = OPERATOR_SUBCOMMANDS.filter((item) => item.label.startsWith(lower)).map((item) => ({ ...item, value: item.label }));
-  return matches.length > 0 ? matches : null;
+
+  // `/operator fleet` or `/operator fleet <partial>` — fleet submenu.
+  if (tokens.length === 1) {
+    return FLEET_SUBCOMMANDS.map((item) => ({ ...item, value: `fleet ${item.label}` }));
+  }
+  if (tokens.length === 2 && !endsWithSpace) {
+    const typed = (tokens[1] ?? '').toLowerCase();
+    const matches = FLEET_SUBCOMMANDS.filter((item) => item.label.startsWith(typed));
+    return matches.map((item) => ({ ...item, value: `fleet ${item.label}` }));
+  }
+
+  // `fleet combo` stages.
+  if ((tokens[1] ?? '').toLowerCase() === 'combo') {
+    try {
+      if (tokens.length === 2) {
+        return [{ value: 'fleet combo council', label: 'council', description: 'Roster used by council.v1 debates', hint: '<provider1> [provider2 ...]' }];
+      }
+      if (tokens.length === 3 && !endsWithSpace) {
+        const combosPath = join(dirname(resolveProviderCatalogPath()), 'combos.json');
+        const names: Array<{ label: string; description: string }> = [{ label: 'council', description: 'Roster used by council.v1 debates' }];
+        if (existsSync(combosPath)) {
+          const saved = JSON.parse(readFileSync(combosPath, 'utf8')) as Record<string, string[]>;
+          for (const [name, providers] of Object.entries(saved)) names.push({ label: name, description: `extend roster (${providers.join(', ')})` });
+        }
+        const typed = (tokens[2] ?? '').toLowerCase();
+        return names.filter((item) => item.label.startsWith(typed)).map((item) => ({ value: `fleet combo ${item.label}`, label: item.label, description: item.description }));
+      }
+      const providerStage = tokens.length >= 4 || (endsWithSpace && tokens.length >= 3);
+      if (providerStage) {
+        const loaded = loadFleetCatalog(resolveProviderCatalogPath());
+        const catalog = loaded ?? { providers: [] };
+        if (catalog.providers.length === 0) return null;
+        const comboName = String(tokens[2]);
+        // The last token is the INCOMPLETE provider being typed — it is not
+        // part of the roster yet, so it must not leak into chosen/persisted.
+        const settled = endsWithSpace ? tokens.slice(3) : tokens.slice(3, -1);
+        const chosen = new Set(settled.map((token) => token.toLowerCase()));
+        return catalog.providers
+          .map((entry) => String(entry['providerId']))
+          .filter((id) => !chosen.has(id.toLowerCase()) && id.toLowerCase().startsWith(partial))
+          .map((id) => ({ value: `fleet combo ${comboName} ${[...chosen, id].join(' ')}`, label: id, description: `add to ${comboName}, Enter saves` }));
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
 }
 
 /**
