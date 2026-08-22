@@ -715,7 +715,8 @@ export class OperatorRuntime {
       if (entries.length === 0) return { ok: false, text: 'fleet bootstrap: no providers found in the OMP model config.', errorCode: 'EVALUATOR_ERROR' };
       const merged = mergeCatalog(loadCatalogFile(catalogPath), bootstrapCatalog(entries));
       saveCatalogFile(catalogPath, merged);
-      return { ok: true, text: `fleet catalog at ${catalogPath}: added ${merged.added.length} provider(s)${merged.added.length > 0 ? ` (${merged.added.join(', ')})` : ''}; total ${merged.providers.length}. Records start READ_ONLY — edit the file to widen.` };
+      void catalogPath;
+      return { ok: true, text: `fleet catalog: added ${merged.added.length} provider(s)${merged.added.length > 0 ? ` (${merged.added.join(', ')})` : ''}; total ${merged.providers.length}. Records start READ_ONLY — edit providers.json to widen.` };
     }
     if (subcommand === 'remove') {
       const target = args[0];
@@ -732,7 +733,7 @@ export class OperatorRuntime {
       return { ok: true, text: 'Fleet catalog is empty or absent. Run `/operator fleet bootstrap` to project your OMP providers into it.' };
     }
     const lines = catalog.providers.map((entry) => `- ${String(entry['providerId'])} (${String(entry['kind'])}, ${String(entry['health'])}, ${String(entry['mutability'])})`);
-    return { ok: true, text: `Fleet catalog (${catalogPath}):\n${lines.join('\n')}` };
+    return { ok: true, text: `Fleet catalog:\n${lines.join('\n')}` };
   }
 
   // -------------------------------------------------------------------------
