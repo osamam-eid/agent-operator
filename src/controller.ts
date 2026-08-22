@@ -31,7 +31,9 @@
 
 import { validateOperatorCommandOutcome, validateStoredOperatorSession } from './runtime-validators.js';
 import { StoreConflictError } from './store.js';
+import { existsSync, readFileSync } from 'node:fs';
 import { parseOperatorCommand } from './commands.js';
+import { bootstrapCatalog, defaultModelsYamlPath, fleetCatalogPath, loadCatalogFile, mergeCatalog, parseOmpModelsYaml, saveCatalogFile } from './fleet-catalog.js';
 import { validateAgentResult } from './validation/results.js';
 import {
   beginExecutionBatch,
@@ -126,6 +128,9 @@ export class OperatorRuntime {
           break;
         case 'RESUME':
           outcome = await this.#handleResume(parsed.operatorSessionId);
+          break;
+        case 'FLEET':
+          outcome = await this.#handleFleet(parsed.subcommand, parsed.args);
           break;
         case 'IMPROVE':
           outcome = this.#deps.evaluatorHandler === undefined
@@ -691,6 +696,43 @@ export class OperatorRuntime {
       });
       return { ok: false, text: `Failed to launch batch "${batchId}": ${describeError(error)}`, errorCode: 'ADAPTER_UNAVAILABLE', operatorSessionId, ...(reconciled.ok ? { session: reconciled.record.session } : {}) };
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // FLEET — operator-owned catalog management (list / bootstrap / remove)
+  // -------------------------------------------------------------------------
+
+  async #handleFleet(subcommand: string, args: readonly string[]): Promise<OperatorCommandOutcome> {
+    const catalogPath = fleetCatalogPath();
+    if (subcommand === 'bootstrap') {
+      let modelsPath = defaultModelsYamlPath();
+      const flagIndex = args.indexOf('--models');
+      if (flagIndex !== -1 && args[flagIndex + 1] !== undefined) modelsPath = args[flagIndex + 1]!;
+      if (!existsSync(modelsPath)) {
+        return { ok: false, text: `fleet bootstrap: OMP model config not found at ${modelsPath}.`, errorCode: 'INVALID_COMMAND' };
+      }
+      const entries = parseOmpModelsYaml(readFileSync(modelsPath, 'utf8'));
+      if (entries.length === 0) return { ok: false, text: 'fleet bootstrap: no providers found in the OMP model config.', errorCode: 'EVALUATOR_ERROR' };
+      const merged = mergeCatalog(loadCatalogFile(catalogPath), bootstrapCatalog(entries));
+      saveCatalogFile(catalogPath, merged);
+      return { ok: true, text: `fleet catalog at ${catalogPath}: added ${merged.added.length} provider(s)${merged.added.length > 0 ? ` (${merged.added.join(', ')})` : ''}; total ${merged.providers.length}. Records start READ_ONLY — edit the file to widen.` };
+    }
+    if (subcommand === 'remove') {
+      const target = args[0];
+      if (target === undefined) return { ok: false, text: 'usage: /operator fleet remove <provider-id>', errorCode: 'INVALID_COMMAND' };
+      const catalog = loadCatalogFile(catalogPath);
+      if (catalog === undefined) return { ok: false, text: 'No fleet catalog to edit.', errorCode: 'INVALID_COMMAND' };
+      const remaining = catalog.providers.filter((entry) => entry['providerId'] !== target);
+      if (remaining.length === catalog.providers.length) return { ok: false, text: `Provider "${target}" is not in the catalog.`, errorCode: 'INVALID_COMMAND' };
+      saveCatalogFile(catalogPath, { providers: remaining });
+      return { ok: true, text: `Removed "${target}". ${remaining.length} provider(s) remain.` };
+    }
+    const catalog = loadCatalogFile(catalogPath);
+    if (catalog === undefined || catalog.providers.length === 0) {
+      return { ok: true, text: 'Fleet catalog is empty or absent. Run `/operator fleet bootstrap` to project your OMP providers into it.' };
+    }
+    const lines = catalog.providers.map((entry) => `- ${String(entry['providerId'])} (${String(entry['kind'])}, ${String(entry['health'])}, ${String(entry['mutability'])})`);
+    return { ok: true, text: `Fleet catalog (${catalogPath}):\n${lines.join('\n')}` };
   }
 
   // -------------------------------------------------------------------------

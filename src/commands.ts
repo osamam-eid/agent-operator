@@ -127,5 +127,10 @@ export function parseOperatorCommand(rawArgs: string): OperatorParseResult {
     return { kind: 'IMPROVE', subcommand: tokens[1]!, args: tokens.slice(2) };
   }
 
+  if (first === 'fleet') {
+    if (tokens.length === 1) return { kind: 'FLEET', subcommand: 'list', args: [] };
+    return { kind: 'FLEET', subcommand: tokens[1]!, args: tokens.slice(2) };
+  }
+
   return { kind: 'START', request: trimmed, mode: 'EXECUTE' };
 }

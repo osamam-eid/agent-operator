@@ -276,9 +276,24 @@ const OPERATOR_SUBCOMMANDS: ReadonlyArray<{ label: string; description: string; 
   { label: '--dry-run', description: 'Preflight a request without dispatching', hint: '<request>' },
   { label: '--explain', description: 'Explain routing without executing', hint: '<request>' },
   { label: 'improve', description: 'Evaluator: harvest, corpus, evaluate, compare, generate', hint: '<subcommand>' },
+  { label: 'fleet', description: 'Manage provider fleet catalog (bootstrap / list / remove)' },
+];
+
+const FLEET_SUBCOMMANDS: ReadonlyArray<{ label: string; description: string; hint?: string }> = [
+  { label: 'list', description: 'Show curated fleet providers' },
+  { label: 'bootstrap', description: 'Project your OMP providers into the catalog', hint: '[--models <path>]' },
+  { label: 'remove', description: 'Remove one provider from the catalog', hint: '<provider-id>' },
 ];
 
 function completeOperatorSubcommand(argumentPrefix: string): Array<{ value: string; label: string; description: string; hint?: string }> | null {
+  const tokens = argumentPrefix.trim().split(/\s+/).filter((token) => token.length > 0);
+  if (tokens[0]?.toLowerCase() === 'fleet') {
+    if (tokens.length === 1 && !argumentPrefix.endsWith(' ')) {
+      const matches = FLEET_SUBCOMMANDS.filter((item) => item.label.startsWith(tokens[1] ?? '') === false && (tokens[1] ?? '').length === 0 || item.label.startsWith(tokens[1] ?? ''));
+      return matches.map((item) => ({ ...item, value: item.label }));
+    }
+    return null;
+  }
   if (argumentPrefix.includes(' ')) return null;
   const lower = argumentPrefix.trim().toLowerCase();
   const matches = OPERATOR_SUBCOMMANDS.filter((item) => item.label.startsWith(lower)).map((item) => ({ ...item, value: item.label }));

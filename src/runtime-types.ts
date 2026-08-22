@@ -26,7 +26,8 @@ export type OperatorCommand =
   | { readonly kind: 'CONTINUE' }
   | { readonly kind: 'CANCEL' }
   | { readonly kind: 'RESUME'; readonly operatorSessionId: string }
-  | { readonly kind: 'IMPROVE'; readonly subcommand: string; readonly args: readonly string[] };
+  | { readonly kind: 'IMPROVE'; readonly subcommand: string; readonly args: readonly string[] }
+  | { readonly kind: 'FLEET'; readonly subcommand: string; readonly args: readonly string[] };
 
 export type OperatorCommandErrorCode =
   | 'INVALID_COMMAND'
