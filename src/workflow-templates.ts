@@ -488,7 +488,25 @@ const FLEET_V1: TemplateDefinition = {
   ],
 };
 
-const V1_TEMPLATE_DEFINITIONS: readonly TemplateDefinition[] = [PLAN_V1, IMPLEMENT_V1, QA_V1, SECURITY_V1, UI_CHANGE_V1, RESEARCH_V1];
+const COUNCIL_RESEARCH_V1: TemplateDefinition = {
+  templateId: 'council.v1',
+  version: 1,
+  taskFamilies: ['RESEARCH'],
+  executionShape: 'COUNCIL',
+  description: 'Multi-model council: independent debaters (distinct fleet providers when available), council synthesis, optional adversarial verification, operator synthesis.',
+  requiredGateTypes: ['RESULT_APPROVAL'],
+  nodes: [
+    { nodeId: 'council-a', role: 'council-debater', baseMandatory: true, dependsOn: [], groupId: 'council-group', contract: { contextPolicy: 'isolated', consumes: [], produces: ['council-position-a.v1'], requiredCapability: 'research' } },
+    { nodeId: 'council-b', role: 'council-debater', baseMandatory: true, dependsOn: [], groupId: 'council-group', contract: { contextPolicy: 'isolated', consumes: [], produces: ['council-position-b.v1'], requiredCapability: 'research' } },
+    { nodeId: 'council-c', role: 'council-debater', baseMandatory: false, dependsOn: [], groupId: 'council-group', contract: { contextPolicy: 'isolated', consumes: [], produces: ['council-position-c.v1'], requiredCapability: 'research' } },
+    { nodeId: 'council-synthesis', role: 'council-synthesizer', baseMandatory: true, synthesisOwner: true, groupId: 'council-group', dependsOn: ['council-a', 'council-b', 'council-c'], contract: { contextPolicy: 'summary-only', consumes: ['council-position-a.v1', 'council-position-b.v1', 'council-position-c.v1'], produces: ['council-verdict.v1'], requiredCapability: 'synthesis' } },
+    { nodeId: 'council-verifier', role: 'independent-reviewer', baseMandatory: false, policyGate: 'adversarialReview', dependsOn: ['council-synthesis'], independentFromNodeIds: ['council-a', 'council-b', 'council-c'], contract: { contextPolicy: 'evidence-only', consumes: ['council-verdict.v1'], produces: ['council-verification.v1'], requiredCapability: 'independent-review' } },
+    { nodeId: 'operator-synthesis', role: 'operator-synthesis', baseMandatory: true, synthesisOwner: true, dependsOn: ['council-verifier'], contract: { contextPolicy: 'summary-only', consumes: ['council-verdict.v1', 'council-verification.v1'], produces: ['operator-synthesis.v1'], requiredCapability: 'operator-synthesis' } },
+  ],
+};
+
+const V1_TEMPLATE_DEFINITIONS: readonly TemplateDefinition[] = [PLAN_V1, IMPLEMENT_V1, QA_V1, SECURITY_V1, UI_CHANGE_V1, RESEARCH_V1,
+];
 const STAGE7_TEMPLATE_DEFINITIONS: readonly TemplateDefinition[] = [QA_V2, UI_CHANGE_V2];
 const STAGE9_TEMPLATE_DEFINITIONS: readonly TemplateDefinition[] = [FLEET_V1];
 const TEMPLATE_DEFINITIONS: readonly TemplateDefinition[] = [...V1_TEMPLATE_DEFINITIONS, ...STAGE7_TEMPLATE_DEFINITIONS, ...STAGE9_TEMPLATE_DEFINITIONS];
@@ -550,8 +568,12 @@ export function getWorkflowTemplateById(templateId: string, featureSet?: Stage7F
   return template;
 }
 
-export function selectWorkflowTemplateForFamily(taskFamily: TaskFamily, featureSet?: Stage7FeatureSet): RegisteredWorkflowTemplate | null {
+export function selectWorkflowTemplateForFamily(taskFamily: TaskFamily, featureSet?: Stage7FeatureSet, requestedShape?: 'DIRECT' | 'SINGLE' | 'PARALLEL' | 'PIPELINE' | 'COUNCIL'): RegisteredWorkflowTemplate | null {
   if (taskFamily === 'DIRECT') return null;
+  if (requestedShape === 'COUNCIL') {
+    if (taskFamily !== 'RESEARCH') return null;
+    return buildRegisteredTemplate(COUNCIL_RESEARCH_V1);
+  }
   if (featureSet?.stage7Enabled === true && (taskFamily === 'QA' || taskFamily === 'UI')) return STAGE7_TEMPLATE_BY_FAMILY[taskFamily] ?? null;
   return TEMPLATE_BY_FAMILY[taskFamily] ?? null;
 }

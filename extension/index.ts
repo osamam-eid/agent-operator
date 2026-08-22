@@ -283,6 +283,7 @@ const FLEET_SUBCOMMANDS: ReadonlyArray<{ label: string; description: string; hin
   { label: 'list', description: 'Show curated fleet providers' },
   { label: 'bootstrap', description: 'Project your OMP providers into the catalog', hint: '[--models <path>]' },
   { label: 'remove', description: 'Remove one provider from the catalog', hint: '<provider-id>' },
+  { label: 'combo', description: 'Define a provider combo (e.g. your council roster)', hint: '<name> <provider1> [provider2 ...]' },
 ];
 
 function completeOperatorSubcommand(argumentPrefix: string): Array<{ value: string; label: string; description: string; hint?: string }> | null {

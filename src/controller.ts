@@ -31,8 +31,9 @@
 
 import { validateOperatorCommandOutcome, validateStoredOperatorSession } from './runtime-validators.js';
 import { StoreConflictError } from './store.js';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync , mkdirSync, writeFileSync } from 'node:fs';
 import { parseOperatorCommand } from './commands.js';
+import { join, dirname } from 'node:path';
 import { bootstrapCatalog, defaultModelsYamlPath, fleetCatalogPath, loadCatalogFile, mergeCatalog, parseOmpModelsYaml, saveCatalogFile } from './fleet-catalog.js';
 import { validateAgentResult } from './validation/results.js';
 import {
@@ -717,6 +718,29 @@ export class OperatorRuntime {
       saveCatalogFile(catalogPath, merged);
       void catalogPath;
       return { ok: true, text: `fleet catalog: added ${merged.added.length} provider(s)${merged.added.length > 0 ? ` (${merged.added.join(', ')})` : ''}; total ${merged.providers.length}. Records start READ_ONLY — edit providers.json to widen.` };
+    }
+    if (subcommand === 'combo') {
+      const name = args[0];
+      if (name === undefined) {
+        const combosPath = join(dirname(catalogPath), 'combos.json');
+        if (!existsSync(combosPath)) return { ok: true, text: 'No fleet combos defined. Usage: /operator fleet combo <name> <provider1> [provider2 ...] — e.g. council roster for /operator --shape council.' };
+        const combos = JSON.parse(readFileSync(combosPath, 'utf8')) as Record<string, string[]>;
+        const lines = Object.entries(combos).map(([comboName, providers]) => `- ${comboName}: ${providers.join(', ')}`);
+        return { ok: true, text: `Fleet combos:\n${lines.join('\n')}` };
+      }
+      const providers = args.slice(1);
+      if (providers.length === 0) return { ok: false, text: 'usage: /operator fleet combo <name> <provider1> [provider2 ...]', errorCode: 'INVALID_COMMAND' };
+      const catalog = loadCatalogFile(catalogPath);
+      if (catalog === undefined) return { ok: false, text: 'No fleet catalog; run `/operator fleet bootstrap` first.', errorCode: 'INVALID_COMMAND' };
+      const known = new Set(catalog.providers.map((entry) => String(entry['providerId'])));
+      const unknown = providers.filter((entry) => !known.has(entry));
+      if (unknown.length > 0) return { ok: false, text: `Unknown provider id(s): ${unknown.join(', ')}.`, errorCode: 'INVALID_COMMAND' };
+      const combosPath = join(dirname(catalogPath), 'combos.json');
+      const combos = existsSync(combosPath) ? JSON.parse(readFileSync(combosPath, 'utf8')) as Record<string, string[]> : {};
+      combos[name] = [...new Set(providers)];
+      mkdirSync(dirname(combosPath), { recursive: true, mode: 0o700 });
+      writeFileSync(combosPath, JSON.stringify(combos, null, 2), { mode: 0o600 });
+      return { ok: true, text: `Combo "${name}" set to: ${combos[name].join(', ')}.` };
     }
     if (subcommand === 'remove') {
       const target = args[0];

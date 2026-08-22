@@ -276,7 +276,7 @@ class Stage3WorkflowCompiler implements OperatorWorkflowCompiler {
       template = fleetTemplate;
     } else {
       try {
-        template = selectWorkflowTemplateForFamily(classification.requestClassification, this.stage7FeatureSet);
+        template = selectWorkflowTemplateForFamily(classification.requestClassification, this.stage7FeatureSet, classification.requestedExecutionShape);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return failure('GRAPH_INVALID', `Template selection threw: ${message}`, resolvedPolicy.policyRefs);

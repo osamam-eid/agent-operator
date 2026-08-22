@@ -8,6 +8,7 @@ import {
 } from '../src/fleet-catalog.js';
 import { normalizeProviderCatalog } from '../src/provider-fleet.js';
 import { parseOperatorCommand } from '../src/commands.js';
+import { selectWorkflowTemplateForFamily } from '../src/workflow-templates.js';
 import { OperatorRuntime } from '../src/controller.js';
 import { MemoryOperatorSessionStore } from '../src/store.js';
 
@@ -89,6 +90,17 @@ describe('fleet catalog', () => {
       if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = previousXdg;
       rmSync(tmp, { recursive: true, force: true });
     }
+  });
+
+  test('council.v1 selected only on explicit COUNCIL shape; cost ceiling honored by schema', () => {
+    expect(selectWorkflowTemplateForFamily('RESEARCH', undefined, 'COUNCIL')?.template.templateId).toBe('council.v1');
+    expect(selectWorkflowTemplateForFamily('RESEARCH', undefined)?.template.templateId).toBe('research.v1');
+    expect(selectWorkflowTemplateForFamily('PLAN', undefined, 'COUNCIL')).toBeNull();
+    const council = selectWorkflowTemplateForFamily('RESEARCH', undefined, 'COUNCIL');
+    expect(council?.template.executionShape).toBe('COUNCIL');
+    expect(council).toBeDefined();
+    const councilNodeIds = council === undefined || council === null ? [] : Object.keys(council.nodeContracts as unknown as Record<string, unknown>);
+    expect(councilNodeIds.filter((nodeId) => nodeId.startsWith('council-')).length).toBeGreaterThanOrEqual(4);
   });
 
   test('parse surface', () => {

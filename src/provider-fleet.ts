@@ -64,6 +64,8 @@ export interface ProviderSelectionRequest {
   readonly executionShape: 'SINGLE' | 'PARALLEL' | 'PIPELINE';
   readonly mutationClass: MutationClass;
   readonly minimumModelTier?: ModelTier;
+  /** Policy budget ceiling: models above this cost class are ineligible (CHEAP can never pick HIGH-cost). */
+  readonly maxCostClass?: 'LOW' | 'MEDIUM' | 'HIGH';
   readonly requiredTools?: readonly string[];
   /** Compiled node tool ceiling (Stage 9): a candidate declaring any tool outside it is rejected with PRIVILEGE_ESCALATION instead of silently skipped. */
   readonly toolCeiling?: readonly string[];
@@ -184,7 +186,9 @@ function tierAtLeast(actual: ModelTier, minimum: ModelTier | undefined): boolean
 
 function compatible(record: NormalizedProviderRecord, model: ProviderModelDescriptor, request: ProviderSelectionRequest): boolean {
   const requiredTools = request.requiredTools ?? [];
-  return record.health === 'HEALTHY' && record.auth === 'AUTHENTICATED' && record.capabilities.includes(request.capability) && record.supports.includes(request.executionShape) && requiredTools.every((tool) => record.tools.includes(tool)) && tierAtLeast(model.tier, request.minimumModelTier) && (request.mutationClass === 'READ_ONLY' ? record.mutability === 'READ_ONLY' : record.mutability === 'MUTATING') && (model.disclosed || request.preference.allowUndisclosedModels);
+  const costRank: Record<string, number> = { LOW: 0, MEDIUM: 1, HIGH: 2 };
+  const withinCost = request.maxCostClass === undefined || (costRank[model.costClass] ?? 2) <= (costRank[request.maxCostClass] ?? 2);
+  return record.health === 'HEALTHY' && record.auth === 'AUTHENTICATED' && record.capabilities.includes(request.capability) && record.supports.includes(request.executionShape) && requiredTools.every((tool) => record.tools.includes(tool)) && tierAtLeast(model.tier, request.minimumModelTier) && withinCost && (request.mutationClass === 'READ_ONLY' ? record.mutability === 'READ_ONLY' : record.mutability === 'MUTATING') && (model.disclosed || request.preference.allowUndisclosedModels);
 }
 
 function candidateOrder(request: ProviderSelectionRequest): readonly string[] {
