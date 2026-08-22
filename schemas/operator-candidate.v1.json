@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omp.local/agent-operator/schemas/operator-candidate.v1.json",
+  "title": "OperatorCandidate.v1",
+  "type": "object",
+  "properties": {
+    "candidateId": {
+      "type": "string"
+    },
+    "baseVersion": {
+      "const": "stage9-sealed"
+    },
+    "baseDigest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "createdAt": {
+      "type": "string"
+    },
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "component": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "UNCHANGED",
+              "CHANGED",
+              "PROHIBITED"
+            ]
+          }
+        },
+        "required": [
+          "component",
+          "status"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "candidateId",
+    "baseVersion",
+    "baseDigest",
+    "components",
+    "createdAt"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,2182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omp.local/agent-operator/schemas/operator-session.v1.json",
+  "title": "OperatorSession.v1",
+  "description": "OperatorSession.v1 (plan §4): the canonical, resumable operator state. Provider (Claude/Codex/etc.) session IDs are children of it, never replacements.",
+  "type": "object",
+  "properties": {
+    "operatorSessionId": {
+      "type": "string",
+      "description": "Session identifier.",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "schemaVersion": {
+      "type": "string",
+      "description": "Contract schema version, e.g. \"1\".",
+      "minLength": 1,
+      "maxLength": 32
+    },
+    "originalRequest": {
+      "type": "string",
+      "description": "The user's original request text.",
+      "minLength": 1,
+      "maxLength": 20000
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the session was created."
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the session was last updated."
+    },
+    "currentState": {
+      "$ref": "#/$defs/SessionState"
+    },
+    "currentPhase": {
+      "type": "string",
+      "description": "Fine-grained phase label within currentState.",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "routeDecision": {
+      "description": "The resolved route, or null before routing completes.",
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/RouteDecision"
+        }
+      ]
+    },
+    "workflowTemplateId": {
+      "description": "Selected WorkflowTemplate.templateId, or null before selection.",
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "description": "Template identifier.",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9-]*\\.v[0-9]+$"
+        }
+      ]
+    },
+    "executionGraph": {
+      "description": "The compiled graph, or null before compilation.",
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/ExecutionGraph"
+        }
+      ]
+    },
+    "nodeStates": {
+      "type": "object",
+      "description": "Per-node current NodeState, keyed by nodeId.",
+      "propertyNames": {
+        "type": "string",
+        "description": "nodeId.",
+        "minLength": 1,
+        "maxLength": 256,
+        "pattern": "^[a-z][a-z0-9-]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/NodeState"
+      },
+      "minProperties": 0
+    },
+    "providerSessionIds": {
+      "type": "object",
+      "description": "Per-node child provider session id, keyed by nodeId.",
+      "propertyNames": {
+        "type": "string",
+        "description": "nodeId.",
+        "minLength": 1,
+        "maxLength": 256,
+        "pattern": "^[a-z][a-z0-9-]*$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "description": "Provider session id.",
+        "minLength": 1,
+        "maxLength": 256
+      },
+      "minProperties": 0
+    },
+    "humanDecisions": {
+      "type": "array",
+      "description": "Recorded human decisions against opened gates.",
+      "items": {
+        "$ref": "#/$defs/HumanDecisionRecord"
+      },
+      "minItems": 0
+    },
+    "artifacts": {
+      "type": "array",
+      "description": "Every artifact produced within this session.",
+      "items": {
+        "$ref": "#/$defs/ArtifactManifest"
+      },
+      "minItems": 0
+    },
+    "evidence": {
+      "type": "array",
+      "description": "Every evidence record captured within this session.",
+      "items": {
+        "$ref": "#/$defs/Evidence"
+      },
+      "minItems": 0
+    },
+    "verificationState": {
+      "$ref": "#/$defs/VerificationState"
+    },
+    "budgetState": {
+      "$ref": "#/$defs/BudgetState"
+    },
+    "journal": {
+      "type": "array",
+      "description": "Compact workflow event log.",
+      "items": {
+        "$ref": "#/$defs/JournalEntry"
+      },
+      "minItems": 0
+    },
+    "terminalResult": {
+      "description": "The terminal result, or null before the session reaches a terminal state.",
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/FinalOperatorResult"
+        }
+      ]
+    },
+    "stopDetail": {
+      "$ref": "#/$defs/StopDetail"
+    },
+    "openGateId": {
+      "type": "string",
+      "description": "Open HumanGate.gateId awaiting a decision. Required exactly when currentState is AWAITING_HUMAN; absent otherwise (plan §9).",
+      "minLength": 1,
+      "maxLength": 256
+    }
+  },
+  "required": [
+    "operatorSessionId",
+    "schemaVersion",
+    "originalRequest",
+    "createdAt",
+    "updatedAt",
+    "currentState",
+    "currentPhase",
+    "routeDecision",
+    "workflowTemplateId",
+    "executionGraph",
+    "nodeStates",
+    "providerSessionIds",
+    "humanDecisions",
+    "artifacts",
+    "evidence",
+    "verificationState",
+    "budgetState",
+    "journal",
+    "terminalResult"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "currentState": {
+            "enum": [
+              "BLOCKED",
+              "NEEDS_REPLAN"
+            ]
+          }
+        },
+        "required": [
+          "currentState"
+        ]
+      },
+      "then": {
+        "required": [
+          "stopDetail"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "currentState": {
+            "not": {
+              "enum": [
+                "BLOCKED",
+                "NEEDS_REPLAN"
+              ]
+            }
+          }
+        },
+        "required": [
+          "currentState"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "stopDetail"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "currentState": {
+            "const": "AWAITING_HUMAN"
+          }
+        },
+        "required": [
+          "currentState"
+        ]
+      },
+      "then": {
+        "required": [
+          "openGateId"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "currentState": {
+            "not": {
+              "const": "AWAITING_HUMAN"
+            }
+          }
+        },
+        "required": [
+          "currentState"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "openGateId"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "currentState": {
+            "enum": [
+              "COMPLETED",
+              "FAILED",
+              "CANCELLED"
+            ]
+          }
+        },
+        "required": [
+          "currentState"
+        ]
+      },
+      "then": {
+        "properties": {
+          "terminalResult": {
+            "$ref": "#/$defs/FinalOperatorResult"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "currentState": {
+            "not": {
+              "enum": [
+                "COMPLETED",
+                "FAILED",
+                "CANCELLED"
+              ]
+            }
+          }
+        },
+        "required": [
+          "currentState"
+        ]
+      },
+      "then": {
+        "properties": {
+          "terminalResult": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "Abstention": {
+      "type": "object",
+      "description": "Whether the operator abstained from a confident automatic route (plan §6).",
+      "properties": {
+        "abstained": {
+          "type": "boolean",
+          "description": "Whether the operator abstained."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why the operator abstained. Required and non-empty when abstained is true.",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      },
+      "required": [
+        "abstained"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "abstained": {
+                "const": true
+              }
+            },
+            "required": [
+              "abstained"
+            ]
+          },
+          "then": {
+            "required": [
+              "reason"
+            ]
+          }
+        }
+      ]
+    },
+    "ArtifactManifest": {
+      "type": "object",
+      "description": "ArtifactManifest.v1 (plan §11): typed record of a produced artifact.",
+      "properties": {
+        "artifactId": {
+          "type": "string",
+          "description": "Artifact identifier.",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "artifactType": {
+          "type": "string",
+          "description": "Artifact contract type, e.g. implementation-plan.v1, patch.v1, test-evidence.v1 (plan §11).",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9-]*\\.v[0-9]+$"
+        },
+        "producedByNodeId": {
+          "$ref": "#/$defs/NodeIdRef"
+        },
+        "operatorSessionId": {
+          "type": "string",
+          "description": "Owning OperatorSession.operatorSessionId.",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "hash": {
+          "type": "string",
+          "description": "Content hash of the artifact.",
+          "minLength": 1,
+          "maxLength": 2000,
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "location": {
+          "type": "string",
+          "description": "Opaque, resolvable storage reference/URI for the artifact content.",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "description": "Artifact content size in bytes.",
+          "minimum": 0
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the artifact was produced."
+        },
+        "contentSummary": {
+          "type": "string",
+          "description": "Concise, decision-oriented summary of the artifact content; never a raw reasoning trace.",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "policyRefs": {
+          "type": "array",
+          "description": "Versioned policy citations governing this artifact.",
+          "items": {
+            "$ref": "#/$defs/PolicyRef"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "artifactId",
+        "artifactType",
+        "producedByNodeId",
+        "operatorSessionId",
+        "hash",
+        "location",
+        "createdAt",
+        "contentSummary",
+        "policyRefs"
+      ],
+      "additionalProperties": false
+    },
+    "BudgetEffect": {
+      "type": "object",
+      "description": "Effect of a route on the active budget profile.",
+      "properties": {
+        "profile": {
+          "$ref": "#/$defs/BudgetProfile"
+        },
+        "estimatedTokens": {
+          "type": "integer",
+          "description": "Estimated token usage.",
+          "minimum": 0
+        },
+        "estimatedCost": {
+          "type": "number",
+          "description": "Estimated monetary/unit cost.",
+          "minimum": 0
+        },
+        "estimatedDurationMs": {
+          "type": "integer",
+          "description": "Estimated wall-clock duration in milliseconds.",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "profile"
+      ],
+      "additionalProperties": false
+    },
+    "BudgetProfile": {
+      "type": "string",
+      "description": "Budget profile selectable via --budget (plan §10).",
+      "enum": [
+        "CHEAP",
+        "BALANCED",
+        "QUALITY",
+        "CRITICAL"
+      ]
+    },
+    "BudgetState": {
+      "type": "object",
+      "description": "Live budget accounting for an OperatorSession (plan §10).",
+      "properties": {
+        "profile": {
+          "$ref": "#/$defs/BudgetProfile"
+        },
+        "tokensUsed": {
+          "type": "integer",
+          "description": "Tokens consumed so far.",
+          "minimum": 0
+        },
+        "costUsed": {
+          "type": "number",
+          "description": "Cost consumed so far.",
+          "minimum": 0
+        },
+        "tokensLimit": {
+          "type": "integer",
+          "description": "Configured token ceiling, when bounded.",
+          "minimum": 0
+        },
+        "costLimit": {
+          "type": "number",
+          "description": "Configured cost ceiling, when bounded.",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "profile",
+        "tokensUsed",
+        "costUsed"
+      ],
+      "additionalProperties": false
+    },
+    "Confidence": {
+      "type": "string",
+      "description": "Confidence/abstention tier (plan §6). LOW never automatically selects a more expensive model or council.",
+      "enum": [
+        "HIGH",
+        "MEDIUM",
+        "LOW"
+      ]
+    },
+    "ContextPolicy": {
+      "type": "string",
+      "description": "Context isolation policy for a node's inputs (plan §11).",
+      "enum": [
+        "shared",
+        "isolated",
+        "summary-only",
+        "artifact-only",
+        "evidence-only"
+      ]
+    },
+    "Evidence": {
+      "type": "object",
+      "description": "Evidence.v1 (plan §11): a claim grounded in a concrete, independently checkable source.",
+      "properties": {
+        "evidenceId": {
+          "type": "string",
+          "description": "Evidence identifier.",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "type": {
+          "$ref": "#/$defs/EvidenceType"
+        },
+        "source": {
+          "type": "string",
+          "description": "Where the evidence originated (command, tool, or observation source); portable, no hardcoded usernames/paths.",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "artifact": {
+          "type": "string",
+          "description": "Referenced ArtifactManifest.artifactId, when the evidence is backed by a stored artifact.",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "claim": {
+          "type": "string",
+          "description": "The specific claim this evidence supports or refutes.",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the evidence was captured."
+        },
+        "producer": {
+          "type": "string",
+          "description": "Role or nodeId that produced this evidence.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "verificationStatus": {
+          "$ref": "#/$defs/EvidenceVerificationStatus"
+        },
+        "verifiedBy": {
+          "type": "string",
+          "description": "nodeId/role of the independent verifier.",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "evidenceId",
+        "type",
+        "source",
+        "claim",
+        "timestamp",
+        "producer",
+        "verificationStatus"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "verificationStatus": {
+                "const": "UNVERIFIED"
+              }
+            },
+            "required": [
+              "verificationStatus"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "verifiedBy"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "verificationStatus": {
+                "enum": [
+                  "VERIFIED",
+                  "CONTRADICTED",
+                  "INCONCLUSIVE"
+                ]
+              }
+            },
+            "required": [
+              "verificationStatus"
+            ]
+          },
+          "then": {
+            "required": [
+              "verifiedBy"
+            ]
+          }
+        }
+      ]
+    },
+    "EvidenceType": {
+      "type": "string",
+      "description": "Kind of evidence backing a claim.",
+      "enum": [
+        "TEST_RESULT",
+        "COMMAND_OUTPUT",
+        "FILE_DIFF",
+        "SCREENSHOT",
+        "LOG_EXCERPT",
+        "EXTERNAL_SOURCE",
+        "HUMAN_STATEMENT",
+        "OTHER"
+      ]
+    },
+    "EvidenceVerificationStatus": {
+      "type": "string",
+      "description": "Whether a claim's evidence has been independently verified.",
+      "enum": [
+        "UNVERIFIED",
+        "VERIFIED",
+        "CONTRADICTED",
+        "INCONCLUSIVE"
+      ]
+    },
+    "ExecutionGraph": {
+      "type": "object",
+      "description": "ExecutionGraph.v1 (plan §4, §7): the compiled, session-bound instantiation of a WorkflowTemplate.",
+      "properties": {
+        "graphId": {
+          "type": "string",
+          "description": "Execution graph identifier.",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "graphRevision": {
+          "type": "integer",
+          "description": "Monotonic revision counter; bound by HumanGate.graphRevision approvals.",
+          "minimum": 1
+        },
+        "workflowTemplateId": {
+          "type": "string",
+          "description": "Source WorkflowTemplate.templateId.",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9-]*\\.v[0-9]+$"
+        },
+        "executionShape": {
+          "$ref": "#/$defs/ExecutionShape"
+        },
+        "nodes": {
+          "type": "array",
+          "description": "Instantiated graph nodes.",
+          "items": {
+            "$ref": "#/$defs/ExecutionGraphNode"
+          },
+          "minItems": 1
+        },
+        "graphHash": {
+          "type": "string",
+          "description": "Content hash of the compiled graph; bound by HumanGate.graphHash approvals.",
+          "minLength": 1,
+          "maxLength": 2000,
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "graphId",
+        "graphRevision",
+        "workflowTemplateId",
+        "executionShape",
+        "nodes",
+        "graphHash"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "executionShape": {
+                "enum": [
+                  "PARALLEL",
+                  "COUNCIL"
+                ]
+              }
+            },
+            "required": [
+              "executionShape"
+            ]
+          },
+          "then": {
+            "properties": {
+              "nodes": {
+                "contains": {
+                  "required": [
+                    "groupId"
+                  ]
+                },
+                "minContains": 2
+              }
+            }
+          },
+          "$comment": "Structural parity only: requires at least 2 nodes to declare a groupId when executionShape is PARALLEL or COUNCIL. JSON Schema draft 2020-12 cannot assert that those nodes share the same groupId value; the full group-membership and exactly-one-synthesisOwner-per-group invariants must be enforced by validators/tests."
+        }
+      ]
+    },
+    "ExecutionGraphNode": {
+      "type": "object",
+      "description": "One instantiated ExecutionGraph node (plan §4, §7).",
+      "properties": {
+        "nodeId": {
+          "$ref": "#/$defs/NodeIdRef"
+        },
+        "capabilityId": {
+          "type": "string",
+          "description": "Assigned CapabilityRecord.id.",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "role": {
+          "type": "string",
+          "description": "Template role name this node fills.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "mandatory": {
+          "type": "boolean",
+          "description": "Mandatory-node failure prevents workflow success (plan §7)."
+        },
+        "dependsOn": {
+          "type": "array",
+          "description": "nodeIds this node depends on.",
+          "items": {
+            "$ref": "#/$defs/NodeIdRef"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "groupId": {
+          "type": "string",
+          "description": "Parallel/council group identifier, when this node is part of one.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "synthesisOwner": {
+          "type": "boolean",
+          "description": "Whether this node is the required operator-synthesis owner for its group (plan §7)."
+        },
+        "verificationOwnerNodeId": {
+          "type": "string",
+          "description": "Independent verification-owner nodeId. Required and distinct from nodeId whenever mutation is present.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "mutation": {
+          "$ref": "#/$defs/MutationMetadata"
+        },
+        "contextPolicy": {
+          "$ref": "#/$defs/ContextPolicy"
+        },
+        "consumes": {
+          "type": "array",
+          "description": "Artifact contract types this node consumes (plan §11).",
+          "items": {
+            "type": "string",
+            "description": "Artifact type id.",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9-]*\\.v[0-9]+$"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "produces": {
+          "type": "array",
+          "description": "Artifact contract types this node produces (plan §11).",
+          "items": {
+            "type": "string",
+            "description": "Artifact type id.",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9-]*\\.v[0-9]+$"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "nodeId",
+        "capabilityId",
+        "role",
+        "mandatory",
+        "dependsOn",
+        "contextPolicy",
+        "consumes",
+        "produces"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "mutation"
+            ]
+          },
+          "then": {
+            "required": [
+              "verificationOwnerNodeId"
+            ]
+          }
+        }
+      ]
+    },
+    "ExecutionShape": {
+      "type": "string",
+      "description": "V1 execution shape (plan §6).",
+      "enum": [
+        "DIRECT",
+        "SINGLE",
+        "PARALLEL",
+        "PIPELINE",
+        "COUNCIL",
+        "EXTERNAL"
+      ]
+    },
+    "ExecutionStatus": {
+      "type": "string",
+      "description": "Typed execution status (plan §14), independent of workflowStatus.",
+      "enum": [
+        "NOT_STARTED",
+        "RUNNING",
+        "SUCCEEDED",
+        "PARTIAL",
+        "FAILED",
+        "CANCELLED",
+        "UNKNOWN"
+      ]
+    },
+    "FallbackDecision": {
+      "type": "object",
+      "description": "One role-compatible fallback decision applied while routing (plan §10).",
+      "properties": {
+        "role": {
+          "type": "string",
+          "description": "Role the fallback applies to.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "from": {
+          "type": "string",
+          "description": "Originally preferred capability/provider id.",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "to": {
+          "type": "string",
+          "description": "Actually selected capability/provider id.",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "reasonCode": {
+          "$ref": "#/$defs/ReasonCodeToken"
+        }
+      },
+      "required": [
+        "role",
+        "from",
+        "to",
+        "reasonCode"
+      ],
+      "additionalProperties": false
+    },
+    "FinalOperatorResult": {
+      "type": "object",
+      "description": "FinalOperatorResult.v1 (plan §14): the one decision-oriented terminal result rendered to the human. Only Agent Operator produces this; leaf agents recommend dispositions for their own findings only. Contains no chain-of-thought fields.",
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/FinalOperatorResultIdentity"
+        },
+        "status": {
+          "$ref": "#/$defs/FinalOperatorResultStatus"
+        },
+        "decision": {
+          "$ref": "#/$defs/FinalOperatorResultDecision"
+        },
+        "humanDecision": {
+          "$ref": "#/$defs/FinalOperatorResultHumanDecision"
+        },
+        "scope": {
+          "$ref": "#/$defs/FinalOperatorResultScope"
+        },
+        "execution": {
+          "$ref": "#/$defs/FinalOperatorResultExecution"
+        },
+        "verification": {
+          "$ref": "#/$defs/VerificationState"
+        },
+        "findings": {
+          "$ref": "#/$defs/FinalOperatorResultFindings"
+        },
+        "risk": {
+          "$ref": "#/$defs/FinalOperatorResultRisk"
+        },
+        "evidence": {
+          "$ref": "#/$defs/FinalOperatorResultEvidence"
+        },
+        "artifacts": {
+          "$ref": "#/$defs/FinalOperatorResultArtifacts"
+        },
+        "policy": {
+          "$ref": "#/$defs/FinalOperatorResultPolicy"
+        },
+        "usage": {
+          "$ref": "#/$defs/UsageStats"
+        },
+        "next": {
+          "$ref": "#/$defs/FinalOperatorResultNext"
+        }
+      },
+      "required": [
+        "identity",
+        "status",
+        "decision",
+        "humanDecision",
+        "scope",
+        "execution",
+        "verification",
+        "findings",
+        "risk",
+        "evidence",
+        "artifacts",
+        "policy",
+        "usage",
+        "next"
+      ],
+      "additionalProperties": false
+    },
+    "FinalOperatorResultArtifacts": {
+      "type": "object",
+      "description": "Artifacts block of FinalOperatorResult.v1.",
+      "properties": {
+        "artifactRefs": {
+          "type": "array",
+          "description": "ArtifactManifest.artifactId refs.",
+          "items": {
+            "type": "string",
+            "description": "artifactId reference.",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "artifactRefs"
+      ],
+      "additionalProperties": false
+    },
+    "FinalOperatorResultDecision": {
+      "type": "object",
+      "description": "Decision block of FinalOperatorResult.v1.",
+      "properties": {
+        "recommendation": {
+          "$ref": "#/$defs/Recommendation"
+        },
+        "recommendationRationale": {
+          "type": "string",
+          "description": "Mandatory. Must cite: conditions satisfied, conditions unsatisfied, blockers considered, deferred findings considered, remaining risk, and the exact policy rules producing the recommendation (plan §14).",
+          "minLength": 40,
+          "maxLength": 4000
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        }
+      },
+      "required": [
+        "recommendation",
+        "recommendationRationale",
+        "confidence"
+      ],
+      "additionalProperties": false
+    },
+    "FinalOperatorResultEvidence": {
+      "type": "object",
+      "description": "Evidence block of FinalOperatorResult.v1.",
+      "properties": {
+        "evidenceRefs": {
+          "type": "array",
+          "description": "Evidence.evidenceId refs.",
+          "items": {
+            "type": "string",
+            "description": "evidenceId reference.",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "evidenceRefs"
+      ],
+      "additionalProperties": false
+    },
+    "FinalOperatorResultExecution": {
+      "type": "object",
+      "description": "Execution block of FinalOperatorResult.v1. actionsNotPerformed explicitly names omitted actions (commit, push, merge, Jira transition, deployment, production mutation, publication); \"implementation complete\" never implies these occurred (plan §14).",
+      "properties": {
+        "workPerformed": {
+          "type": "array",
+          "description": "Concise, decision-oriented statements of work performed; never a raw reasoning trace.",
+          "items": {
+            "type": "string",
+            "description": "Work item summary.",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "minItems": 0
+        },
+        "changesMade": {
+          "type": "array",
+          "description": "Concise statements of concrete changes made.",
+          "items": {
+            "type": "string",
+            "description": "Change summary.",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "minItems": 0
+        },
+        "actionsNotPerformed": {
+          "type": "array",
+          "description": "Explicitly omitted actions, e.g. commit, push, deployment.",
+          "items": {
+            "type": "string",
+            "description": "Omitted action description.",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "minItems": 0
+        }
+      },
+      "required": [
+        "workPerformed",
+        "changesMade",
+        "actionsNotPerformed"
+      ],
+      "additionalProperties": false
+    },
+    "FinalOperatorResultFindings": {
+      "type": "object",
+      "description": "Findings block of FinalOperatorResult.v1: findingId references bucketed by disposition.",
+      "properties": {
+        "fundamentalBlockers": {
+          "type": "array",
+          "description": "Finding.findingId refs.",
+          "items": {
+            "$ref": "#/$defs/FindingIdRef"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "blockingFindings": {
+          "type": "array",
+          "description": "Finding.findingId refs.",
+          "items": {
+            "$ref": "#/$defs/FindingIdRef"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "nonBlockingFindings": {
+          "type": "array",
+          "description": "Finding.findingId refs.",
+          "items": {
+            "$ref": "#/$defs/FindingIdRef"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "deferredFindings": {
+          "type": "array",
+          "description": "Finding.findingId refs.",
+          "items": {
+            "$ref": "#/$defs/FindingIdRef"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "observations": {
+          "type": "array",
+          "description": "Finding.findingId refs.",
+          "items": {
+            "$ref": "#/$defs/FindingIdRef"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "fundamentalBlockers",
+        "blockingFindings",
+        "nonBlockingFindings",
+        "deferredFindings",
+        "observations"
+      ],
+      "additionalProperties": false
+    },
+    "FinalOperatorResultHumanDecision": {
+      "type": "object",
+      "description": "Human-decision block of FinalOperatorResult.v1.",
+      "properties": {
+        "required": {
+          "type": "boolean",
+          "description": "Whether a human decision is required to progress."
+        },
+        "gateId": {
+          "type": "string",
+          "description": "Open HumanGate.gateId. Required when required is true.",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "decisionType": {
+          "$ref": "#/$defs/GateDecisionType"
+        },
+        "options": {
+          "type": "array",
+          "description": "Options offered by the gate. Required and non-empty when required is true.",
+          "items": {
+            "type": "string",
+            "description": "Option token.",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "recommendedOption": {
+          "type": "string",
+          "description": "Operator-recommended option.",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "required"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "required": {
+                "const": true
+              }
+            },
+            "required": [
+              "required"
+            ]
+          },
+          "then": {
+            "required": [
+              "gateId",
+              "decisionType",
+              "options"
+            ],
+            "properties": {
+              "options": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "FinalOperatorResultIdentity": {
+      "type": "object",
+      "description": "Identity block of FinalOperatorResult.v1 (plan §14).",
+      "properties": {
+        "operatorSessionId": {
+          "type": "string",
+          "description": "Owning OperatorSession.operatorSessionId.",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "workflowTemplate": {
+          "type": "string",
+          "description": "WorkflowTemplate.templateId used.",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9-]*\\.v[0-9]+$"
+        },
+        "graphRevision": {
+          "type": "integer",
+          "description": "ExecutionGraph.graphRevision at terminal synthesis.",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "operatorSessionId",
+        "workflowTemplate",
+        "graphRevision"
+      ],
+      "additionalProperties": false
+    },
+    "FinalOperatorResultNext": {
+      "type": "object",
+      "description": "Next-actions block of FinalOperatorResult.v1. Permission (allowedActions) and recommendation are never conflated.",
+      "properties": {
+        "allowedActions": {
+          "type": "array",
+          "description": "Policy-permitted next steps.",
+          "items": {
+            "type": "string",
+            "description": "Action token.",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "recommendedAction": {
+          "type": "string",
+          "description": "At most one action; must be a member of allowedActions when present.",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "allowedActions"
+      ],
+      "additionalProperties": false
+    },
+    "FinalOperatorResultPolicy": {
+      "type": "object",
+      "description": "Policy block of FinalOperatorResult.v1.",
+      "properties": {
+        "policyRefs": {
+          "type": "array",
+          "description": "Versioned policy citations for the terminal result.",
+          "items": {
+            "$ref": "#/$defs/PolicyRef"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "policyRefs"
+      ],
+      "additionalProperties": false
+    },
+    "FinalOperatorResultRisk": {
+      "type": "object",
+      "description": "Risk block of FinalOperatorResult.v1.",
+      "properties": {
+        "remainingRisks": {
+          "type": "array",
+          "description": "Remaining-risk statements.",
+          "items": {
+            "type": "string",
+            "description": "Risk statement.",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "minItems": 0
+        }
+      },
+      "required": [
+        "remainingRisks"
+      ],
+      "additionalProperties": false
+    },
+    "FinalOperatorResultScope": {
+      "type": "object",
+      "description": "Scope block of FinalOperatorResult.v1. Scope compliance and behavioral verification are separate decisions.",
+      "properties": {
+        "scopeStatus": {
+          "$ref": "#/$defs/ScopeStatus"
+        },
+        "requirementCoverage": {
+          "$ref": "#/$defs/RequirementCoverage"
+        },
+        "deviations": {
+          "type": "array",
+          "description": "Every approved or detected scope deviation.",
+          "items": {
+            "$ref": "#/$defs/ScopeDeviation"
+          },
+          "minItems": 0
+        }
+      },
+      "required": [
+        "scopeStatus",
+        "requirementCoverage",
+        "deviations"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "scopeStatus": {
+                "const": "IN_SCOPE_WITH_APPROVED_DEVIATION"
+              }
+            },
+            "required": [
+              "scopeStatus"
+            ]
+          },
+          "then": {
+            "properties": {
+              "deviations": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/ScopeDeviation"
+                    },
+                    {
+                      "properties": {
+                        "approved": {
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "approved"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "scopeStatus": {
+                "const": "SCOPE_DRIFT_DETECTED"
+              }
+            },
+            "required": [
+              "scopeStatus"
+            ]
+          },
+          "then": {
+            "properties": {
+              "deviations": {
+                "type": "array",
+                "minItems": 1,
+                "contains": {
+                  "properties": {
+                    "approved": {
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "approved"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "FinalOperatorResultStatus": {
+      "type": "object",
+      "description": "Status block of FinalOperatorResult.v1. executionStatus and workflowStatus are independent (plan §14).",
+      "properties": {
+        "executionStatus": {
+          "$ref": "#/$defs/ExecutionStatus"
+        },
+        "workflowStatus": {
+          "$ref": "#/$defs/WorkflowStatus"
+        }
+      },
+      "required": [
+        "executionStatus",
+        "workflowStatus"
+      ],
+      "additionalProperties": false
+    },
+    "FindingIdRef": {
+      "type": "string",
+      "description": "Finding.findingId reference, e.g. SOL-SEC-04.",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "GateDecisionType": {
+      "type": "string",
+      "description": "HumanGate decision category (plan §9, §18).",
+      "enum": [
+        "PLAN_APPROVAL",
+        "EXECUTION_APPROVAL",
+        "RESULT_APPROVAL",
+        "PUBLICATION_APPROVAL",
+        "APPROVE_PROGRESSION",
+        "CUSTOM_DECISION"
+      ]
+    },
+    "HumanDecisionRecord": {
+      "type": "object",
+      "description": "A recorded human decision against one HumanGate, bound to the exact graph/artifact state that was approved (plan §9).",
+      "properties": {
+        "gateId": {
+          "type": "string",
+          "description": "Decided HumanGate.gateId.",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "optionSelected": {
+          "type": "string",
+          "description": "The option the human selected.",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "decisionType": {
+          "$ref": "#/$defs/GateDecisionType"
+        },
+        "outcome": {
+          "type": "string",
+          "description": "Whether this decision approved or rejected the gate's requested decision (plan §9).",
+          "enum": [
+            "APPROVED",
+            "REJECTED"
+          ]
+        },
+        "decidedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the decision was recorded."
+        },
+        "graphHashAtDecision": {
+          "type": "string",
+          "description": "Must equal the session's executionGraph.graphHash at decision time (plan §9: approval binds exactly to session/gate/graphHash).",
+          "minLength": 1,
+          "maxLength": 2000,
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "artifactHashesAtDecision": {
+          "type": "array",
+          "description": "Content hashes of every artifact the approval was bound to.",
+          "items": {
+            "type": "string",
+            "description": "Content hash.",
+            "minLength": 1,
+            "maxLength": 2000,
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "gateId",
+        "optionSelected",
+        "decisionType",
+        "outcome",
+        "decidedAt",
+        "graphHashAtDecision",
+        "artifactHashesAtDecision"
+      ],
+      "additionalProperties": false
+    },
+    "JournalEntry": {
+      "type": "object",
+      "description": "One compact workflow journal event (plan §4): records timestamp, event type, session, node/gate if applicable, reason code, and artifact/evidence references. Never hidden reasoning.",
+      "properties": {
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the event occurred."
+        },
+        "eventType": {
+          "type": "string",
+          "description": "Short uppercase-snake event token, e.g. CLASSIFIED, GATE_APPROVED.",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        },
+        "operatorSessionId": {
+          "type": "string",
+          "description": "Owning OperatorSession.operatorSessionId.",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "nodeId": {
+          "$ref": "#/$defs/NodeIdRef"
+        },
+        "gateId": {
+          "type": "string",
+          "description": "Related HumanGate.gateId, if applicable.",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "reasonCode": {
+          "$ref": "#/$defs/ReasonCodeToken"
+        },
+        "artifactRefs": {
+          "type": "array",
+          "description": "Related ArtifactManifest.artifactId refs.",
+          "items": {
+            "type": "string",
+            "description": "artifactId reference.",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "evidenceRefs": {
+          "type": "array",
+          "description": "Related Evidence.evidenceId refs.",
+          "items": {
+            "type": "string",
+            "description": "evidenceId reference.",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "message": {
+          "type": "string",
+          "description": "Concise, decision-oriented event message; never a raw reasoning trace.",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      },
+      "required": [
+        "timestamp",
+        "eventType",
+        "operatorSessionId",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "MutationClass": {
+      "type": "string",
+      "description": "Declared/instantiated mutation class for a node (plan §4).",
+      "enum": [
+        "READ_ONLY",
+        "LOCAL",
+        "EXTERNAL",
+        "DESTRUCTIVE"
+      ]
+    },
+    "MutationMetadata": {
+      "type": "object",
+      "description": "Concrete mutation metadata attached to an instantiated ExecutionGraph node (plan §4 idempotency).",
+      "properties": {
+        "mutationId": {
+          "type": "string",
+          "description": "Idempotency key for this mutation.",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "mutationClass": {
+          "$ref": "#/$defs/MutationClass"
+        },
+        "retryPolicy": {
+          "$ref": "#/$defs/RetryPolicy"
+        }
+      },
+      "required": [
+        "mutationId",
+        "mutationClass",
+        "retryPolicy"
+      ],
+      "additionalProperties": false
+    },
+    "NodeIdRef": {
+      "type": "string",
+      "description": "Graph/template nodeId reference.",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "NodeState": {
+      "type": "string",
+      "description": "Execution graph node lifecycle state (plan §3). UNKNOWN is required after crash/restart when a previously RUNNING node cannot yet be proven completed or failed.",
+      "enum": [
+        "PENDING",
+        "READY",
+        "RUNNING",
+        "SUCCEEDED",
+        "FAILED",
+        "BLOCKED",
+        "SKIPPED",
+        "CANCELLED",
+        "UNKNOWN"
+      ]
+    },
+    "PolicyRef": {
+      "type": "string",
+      "description": "Versioned policy citation, e.g. masar@3:review.maxRounds or secure-code@2:independentVerification (plan §5, §6).",
+      "minLength": 3,
+      "maxLength": 256,
+      "pattern": "^[a-z][a-z0-9-]*@[0-9]+:[a-zA-Z0-9_.]+$"
+    },
+    "ReasonCodeToken": {
+      "type": "string",
+      "description": "SCREAMING_SNAKE_CASE typed reason token.",
+      "minLength": 2,
+      "maxLength": 64,
+      "pattern": "^[A-Z][A-Z0-9_]*$"
+    },
+    "Recommendation": {
+      "type": "string",
+      "description": "Operator terminal recommendation (plan §14).",
+      "enum": [
+        "GO",
+        "GO_WITH_DEFERRED_ITEMS",
+        "HOLD",
+        "REPLAN",
+        "RETRY",
+        "ESCALATE",
+        "STOP"
+      ]
+    },
+    "RejectedAlternative": {
+      "type": "object",
+      "description": "One rejected routing alternative, with reason code (plan §2 /operator why).",
+      "properties": {
+        "option": {
+          "type": "string",
+          "description": "Rejected role/provider/approach name.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "reasonCode": {
+          "$ref": "#/$defs/ReasonCodeToken"
+        },
+        "details": {
+          "type": "string",
+          "description": "Additional human-readable rejection detail.",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      },
+      "required": [
+        "option",
+        "reasonCode"
+      ],
+      "additionalProperties": false
+    },
+    "RequirementCoverage": {
+      "type": "object",
+      "description": "Aggregate + itemized requirement coverage (plan §14).",
+      "properties": {
+        "items": {
+          "type": "array",
+          "description": "Per-requirement coverage.",
+          "items": {
+            "$ref": "#/$defs/RequirementCoverageItem"
+          },
+          "minItems": 0
+        },
+        "requiredCount": {
+          "type": "integer",
+          "description": "Total required items.",
+          "minimum": 0
+        },
+        "satisfiedCount": {
+          "type": "integer",
+          "description": "Satisfied required items.",
+          "minimum": 0
+        },
+        "unsatisfiedCount": {
+          "type": "integer",
+          "description": "Unsatisfied required items.",
+          "minimum": 0
+        },
+        "deferredCount": {
+          "type": "integer",
+          "description": "Deferred required items.",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "items",
+        "requiredCount",
+        "satisfiedCount",
+        "unsatisfiedCount",
+        "deferredCount"
+      ],
+      "additionalProperties": false
+    },
+    "RequirementCoverageItem": {
+      "type": "object",
+      "description": "Status of one frozen required item (plan §14: passing tests never implies complete requirement coverage).",
+      "properties": {
+        "requirementId": {
+          "type": "string",
+          "description": "Identifier of the frozen requirement.",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "description": {
+          "type": "string",
+          "description": "What the requirement is.",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "status": {
+          "$ref": "#/$defs/RequirementCoverageStatus"
+        }
+      },
+      "required": [
+        "requirementId",
+        "description",
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "RequirementCoverageStatus": {
+      "type": "string",
+      "description": "Status of one frozen required item within requirementCoverage.",
+      "enum": [
+        "SATISFIED",
+        "UNSATISFIED",
+        "DEFERRED"
+      ]
+    },
+    "RetryPolicy": {
+      "type": "string",
+      "description": "Adapter-declared retry policy for a mutation node (plan §4).",
+      "enum": [
+        "AUTOMATIC",
+        "RECONCILE_FIRST",
+        "NEVER_AUTOMATIC",
+        "REQUIRES_HUMAN_GATE"
+      ]
+    },
+    "RiskLevel": {
+      "type": "string",
+      "description": "Risk classification carried by a RouteDecision.",
+      "enum": [
+        "LOW",
+        "MEDIUM",
+        "HIGH",
+        "CRITICAL"
+      ]
+    },
+    "RoleAssignment": {
+      "type": "object",
+      "description": "One role-to-provider selection within a RouteDecision.",
+      "properties": {
+        "role": {
+          "type": "string",
+          "description": "Template role name, e.g. planner, independent-reviewer.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "capabilityId": {
+          "type": "string",
+          "description": "Selected CapabilityRecord.id.",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "provider": {
+          "type": "string",
+          "description": "Concrete provider/role name selected, e.g. opus, codex-high.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9-]*$"
+        }
+      },
+      "required": [
+        "role",
+        "capabilityId",
+        "provider"
+      ],
+      "additionalProperties": false
+    },
+    "RouteDecision": {
+      "type": "object",
+      "description": "RouteDecision.v1 (plan §6): deterministic routing/compilation output for one request.",
+      "properties": {
+        "requestClassification": {
+          "$ref": "#/$defs/TaskFamily"
+        },
+        "riskClassification": {
+          "$ref": "#/$defs/RiskLevel"
+        },
+        "selectedWorkflow": {
+          "type": "string",
+          "description": "Selected WorkflowTemplate.templateId, e.g. plan.v1.",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9-]*\\.v[0-9]+$"
+        },
+        "selectedRolesProviders": {
+          "type": "array",
+          "description": "Roles/providers selected to fill each required template capability.",
+          "items": {
+            "$ref": "#/$defs/RoleAssignment"
+          },
+          "minItems": 1
+        },
+        "rejectedAlternatives": {
+          "type": "array",
+          "description": "Alternatives considered and rejected.",
+          "items": {
+            "$ref": "#/$defs/RejectedAlternative"
+          },
+          "minItems": 0
+        },
+        "requiredGates": {
+          "type": "array",
+          "description": "Gate categories this route requires.",
+          "items": {
+            "$ref": "#/$defs/GateDecisionType"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "budgetEffect": {
+          "$ref": "#/$defs/BudgetEffect"
+        },
+        "fallbackDecisions": {
+          "type": "array",
+          "description": "Role-compatible fallback decisions applied while routing.",
+          "items": {
+            "$ref": "#/$defs/FallbackDecision"
+          },
+          "minItems": 0
+        },
+        "reasonCodes": {
+          "type": "array",
+          "description": "Typed reason codes justifying this route.",
+          "items": {
+            "$ref": "#/$defs/ReasonCodeToken"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "policyRefs": {
+          "type": "array",
+          "description": "Versioned policy citations for this route (plan §6: every policy-derived route cites policyRefs).",
+          "items": {
+            "$ref": "#/$defs/PolicyRef"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        },
+        "abstention": {
+          "$ref": "#/$defs/Abstention"
+        }
+      },
+      "required": [
+        "requestClassification",
+        "riskClassification",
+        "selectedWorkflow",
+        "selectedRolesProviders",
+        "rejectedAlternatives",
+        "requiredGates",
+        "budgetEffect",
+        "fallbackDecisions",
+        "reasonCodes",
+        "policyRefs",
+        "confidence",
+        "abstention"
+      ],
+      "additionalProperties": false
+    },
+    "ScopeDeviation": {
+      "type": "object",
+      "description": "One approved or detected scope deviation (plan §14).",
+      "properties": {
+        "deviationId": {
+          "type": "string",
+          "description": "Deviation identifier.",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "description": {
+          "type": "string",
+          "description": "What deviated from the frozen scope.",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "approved": {
+          "type": "boolean",
+          "description": "Whether this deviation was explicitly approved."
+        },
+        "policyRefs": {
+          "type": "array",
+          "description": "Versioned policy citations for this deviation.",
+          "items": {
+            "$ref": "#/$defs/PolicyRef"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "deviationId",
+        "description",
+        "approved",
+        "policyRefs"
+      ],
+      "additionalProperties": false
+    },
+    "ScopeStatus": {
+      "type": "string",
+      "description": "Scope compliance status (plan §14), separate from behavioral verification.",
+      "enum": [
+        "IN_SCOPE",
+        "IN_SCOPE_WITH_APPROVED_DEVIATION",
+        "SCOPE_DRIFT_DETECTED"
+      ]
+    },
+    "SessionState": {
+      "type": "string",
+      "description": "Operator session lifecycle state (plan §3).",
+      "enum": [
+        "IDLE",
+        "CLASSIFYING",
+        "PLANNING",
+        "AWAITING_HUMAN",
+        "READY",
+        "EXECUTING",
+        "VERIFYING",
+        "BLOCKED",
+        "NEEDS_REPLAN",
+        "COMPLETED",
+        "FAILED",
+        "CANCELLED"
+      ]
+    },
+    "StopDetail": {
+      "type": "object",
+      "description": "Structured stop/disposition detail (plan §3: every stop includes reason, affected node, evidence, retry eligibility, required decision or missing prerequisite, and next allowed action). Populated on an OperatorSession whenever currentState is BLOCKED or NEEDS_REPLAN.",
+      "properties": {
+        "reason": {
+          "$ref": "#/$defs/StopReasonCode"
+        },
+        "affectedNodeId": {
+          "$ref": "#/$defs/NodeIdRef"
+        },
+        "evidenceRefs": {
+          "type": "array",
+          "description": "Evidence.evidenceId references grounding this stop.",
+          "items": {
+            "type": "string",
+            "description": "evidenceId reference.",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "retryEligible": {
+          "type": "boolean",
+          "description": "Whether the affected node/session may be retried."
+        },
+        "requiredDecisionOrPrerequisite": {
+          "type": "string",
+          "description": "What decision or missing prerequisite must be resolved.",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "nextAllowedActions": {
+          "type": "array",
+          "description": "Operator commands legally available from this stop.",
+          "items": {
+            "type": "string",
+            "description": "Command token.",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "reason",
+        "affectedNodeId",
+        "evidenceRefs",
+        "retryEligible",
+        "requiredDecisionOrPrerequisite",
+        "nextAllowedActions"
+      ],
+      "additionalProperties": false
+    },
+    "StopReasonCode": {
+      "type": "string",
+      "description": "Typed stop and disposition reason code (plan §3).",
+      "enum": [
+        "BLOCKED_HUMAN_DECISION",
+        "BLOCKED_REQUIRED_CONTEXT",
+        "BLOCKED_CAPABILITY",
+        "BLOCKED_POLICY",
+        "BLOCKED_SECURITY",
+        "BLOCKED_TEST_FAILURE",
+        "BLOCKED_REVIEW_FAILURE",
+        "BLOCKED_PROVIDER_UNAVAILABLE",
+        "NEEDS_REPLAN",
+        "PLAN_APPROVAL_REQUIRED",
+        "EXECUTION_APPROVAL_REQUIRED",
+        "FUNDAMENTAL_BLOCKER",
+        "NON_BLOCKING_FINDING",
+        "DEFERRED_FINDING"
+      ]
+    },
+    "TaskFamily": {
+      "type": "string",
+      "description": "V1 task family classification (plan §6).",
+      "enum": [
+        "DIRECT",
+        "RESEARCH",
+        "PLAN",
+        "IMPLEMENT",
+        "REVIEW",
+        "UI",
+        "QA",
+        "SECURITY",
+        "OPERATIONS"
+      ]
+    },
+    "UsageStats": {
+      "type": "object",
+      "description": "Usage/cost block of FinalOperatorResult.v1.",
+      "properties": {
+        "providers": {
+          "type": "array",
+          "description": "Providers used, e.g. omp-role, claude, codex.",
+          "items": {
+            "type": "string",
+            "description": "Provider name.",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "models": {
+          "type": "array",
+          "description": "Models used.",
+          "items": {
+            "type": "string",
+            "description": "Model identifier.",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "tokens": {
+          "type": "integer",
+          "description": "Total tokens consumed.",
+          "minimum": 0
+        },
+        "cost": {
+          "type": "number",
+          "description": "Total cost.",
+          "minimum": 0
+        },
+        "duration": {
+          "type": "integer",
+          "description": "Total wall-clock duration in milliseconds.",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "providers",
+        "models",
+        "tokens",
+        "cost",
+        "duration"
+      ],
+      "additionalProperties": false
+    },
+    "VerificationOutcome": {
+      "type": "string",
+      "description": "Outcome of one verification dimension.",
+      "enum": [
+        "NOT_APPLICABLE",
+        "NOT_STARTED",
+        "IN_PROGRESS",
+        "PASSED",
+        "FAILED"
+      ]
+    },
+    "VerificationState": {
+      "type": "object",
+      "description": "The four independently-owned verification dimensions (plan §7, §14).",
+      "properties": {
+        "behavioralVerification": {
+          "$ref": "#/$defs/VerificationOutcome"
+        },
+        "conformanceVerification": {
+          "$ref": "#/$defs/VerificationOutcome"
+        },
+        "independentReview": {
+          "$ref": "#/$defs/VerificationOutcome"
+        },
+        "adversarialReview": {
+          "$ref": "#/$defs/VerificationOutcome"
+        }
+      },
+      "required": [
+        "behavioralVerification",
+        "conformanceVerification",
+        "independentReview",
+        "adversarialReview"
+      ],
+      "additionalProperties": false
+    },
+    "WorkflowStatus": {
+      "type": "string",
+      "description": "Typed workflow status (plan §14), independent of executionStatus.",
+      "enum": [
+        "COMPLETED",
+        "COMPLETED_WITH_DEFERRED_ITEMS",
+        "HUMAN_DECISION_REQUIRED",
+        "BLOCKED",
+        "NEEDS_REPLAN",
+        "FAILED",
+        "CANCELLED",
+        "DECLINED"
+      ]
+    }
+  }
+}

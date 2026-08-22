@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omp.local/agent-operator/schemas/stored-operator-session.v1.json",
+  "title": "StoredOperatorSession.v1",
+  "description": "Stage 2 on-disk store envelope: wraps one OperatorSession.v1 record with its HumanGate.v1 records, which are stored separately from the session (plan §9). Every gate.gateId is unique across the array and every gate.operatorSessionId equals session.operatorSessionId (validators.ts enforces both invariants; this schema documents the object shape).",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "description": "Store envelope format version.",
+      "const": "1.0"
+    },
+    "startupFeatureSetHash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Immutable startup feature-set hash bound to Stage-7 sessions."
+    },
+    "session": {
+      "$ref": "https://omp.local/agent-operator/schemas/operator-session.v1.json"
+    },
+    "gates": {
+      "type": "array",
+      "description": "HumanGate.v1 records owned by this session, stored alongside it rather than embedded in OperatorSession.v1.",
+      "items": {
+        "$ref": "https://omp.local/agent-operator/schemas/human-gate.v1.json"
+      },
+      "minItems": 0
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "session",
+    "gates"
+  ],
+  "additionalProperties": false
+}

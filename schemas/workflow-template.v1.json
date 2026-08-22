@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omp.local/agent-operator/schemas/workflow-template.v1.json",
+  "title": "WorkflowTemplate.v1",
+  "description": "WorkflowTemplate.v1 (plan §7): an approved, versioned workflow DAG naming capability roles, not concrete providers. Concrete provider/capability assignment happens per-session in ExecutionGraph.",
+  "type": "object",
+  "properties": {
+    "templateId": {
+      "type": "string",
+      "description": "Template identifier, e.g. plan.v1, implement.v1.",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9-]*\\.v[0-9]+$"
+    },
+    "version": {
+      "type": "integer",
+      "description": "Template revision number.",
+      "minimum": 1
+    },
+    "taskFamilies": {
+      "type": "array",
+      "description": "Task families this template may serve.",
+      "items": {
+        "$ref": "#/$defs/TaskFamily"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "executionShape": {
+      "$ref": "#/$defs/ExecutionShape"
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable summary of what this template does.",
+      "minLength": 10,
+      "maxLength": 2000
+    },
+    "nodes": {
+      "type": "array",
+      "description": "Declared template DAG nodes.",
+      "items": {
+        "$ref": "#/$defs/WorkflowTemplateNode"
+      },
+      "minItems": 1
+    },
+    "requiredGateTypes": {
+      "type": "array",
+      "description": "Gate categories mandatory for this template (plan §7: terminal success requires all mandatory verification and human gates).",
+      "items": {
+        "$ref": "#/$defs/GateDecisionType"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "templateId",
+    "version",
+    "taskFamilies",
+    "executionShape",
+    "description",
+    "nodes",
+    "requiredGateTypes"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "executionShape": {
+            "enum": [
+              "PARALLEL",
+              "COUNCIL"
+            ]
+          }
+        },
+        "required": [
+          "executionShape"
+        ]
+      },
+      "then": {
+        "properties": {
+          "nodes": {
+            "contains": {
+              "required": [
+                "groupId"
+              ]
+            },
+            "minContains": 2
+          }
+        }
+      },
+      "$comment": "Structural parity only: requires at least 2 nodes to declare a groupId when executionShape is PARALLEL or COUNCIL. JSON Schema draft 2020-12 cannot assert that those nodes share the same groupId value (grouping/cardinality-by-value across array items is outside the vocabulary), so 'at least one group has 2+ members' and the pre-existing exactly-one-synthesisOwner-per-group invariant must be enforced by validators/tests, not this schema."
+    }
+  ],
+  "$defs": {
+    "ExecutionShape": {
+      "type": "string",
+      "description": "V1 execution shape (plan §6).",
+      "enum": [
+        "DIRECT",
+        "SINGLE",
+        "PARALLEL",
+        "PIPELINE",
+        "COUNCIL",
+        "EXTERNAL"
+      ]
+    },
+    "GateDecisionType": {
+      "type": "string",
+      "description": "HumanGate decision category (plan §9, §18).",
+      "enum": [
+        "PLAN_APPROVAL",
+        "EXECUTION_APPROVAL",
+        "RESULT_APPROVAL",
+        "PUBLICATION_APPROVAL",
+        "APPROVE_PROGRESSION",
+        "CUSTOM_DECISION"
+      ]
+    },
+    "MutationClass": {
+      "type": "string",
+      "description": "Declared/instantiated mutation class for a node (plan §4).",
+      "enum": [
+        "READ_ONLY",
+        "LOCAL",
+        "EXTERNAL",
+        "DESTRUCTIVE"
+      ]
+    },
+    "NodeIdRef": {
+      "type": "string",
+      "description": "Graph/template nodeId reference.",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "TaskFamily": {
+      "type": "string",
+      "description": "V1 task family classification (plan §6).",
+      "enum": [
+        "DIRECT",
+        "RESEARCH",
+        "PLAN",
+        "IMPLEMENT",
+        "REVIEW",
+        "UI",
+        "QA",
+        "SECURITY",
+        "OPERATIONS"
+      ]
+    },
+    "WorkflowTemplateNode": {
+      "type": "object",
+      "description": "One node in a WorkflowTemplate's declared DAG (plan §7). Concrete capability assignment happens later, in ExecutionGraphNode.",
+      "properties": {
+        "nodeId": {
+          "$ref": "#/$defs/NodeIdRef"
+        },
+        "role": {
+          "type": "string",
+          "description": "Capability role label, e.g. planner, independent-reviewer.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "mandatory": {
+          "type": "boolean",
+          "description": "Mandatory-node failure prevents workflow success (plan §7)."
+        },
+        "dependsOn": {
+          "type": "array",
+          "description": "nodeIds this node depends on.",
+          "items": {
+            "$ref": "#/$defs/NodeIdRef"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "groupId": {
+          "type": "string",
+          "description": "Parallel/council group identifier, when this node is part of one.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "synthesisOwner": {
+          "type": "boolean",
+          "description": "Whether this node is the template's required operator-synthesis owner (plan §7)."
+        },
+        "mutationClass": {
+          "$ref": "#/$defs/MutationClass"
+        }
+      },
+      "required": [
+        "nodeId",
+        "role",
+        "mandatory",
+        "dependsOn"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

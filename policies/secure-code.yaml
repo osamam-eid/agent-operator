@@ -1,0 +1,15 @@
+schemaVersion: "1.0"
+id: secure-code
+version: 1
+description: Independent and adversarial review requirements for code-touching task families, with mutation capped to local changes until a human approves execution.
+appliesTo:
+  - IMPLEMENT
+  - REVIEW
+  - SECURITY
+incompatibleWith: []
+rules:
+  requireIndependentReview: true
+  requireAdversarialReview: true
+  requireExecutionApprovalForMutation: true
+  maximumMutationClass: LOCAL
+  maxReviewRounds: 2

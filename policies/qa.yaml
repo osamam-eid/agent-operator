@@ -1,0 +1,12 @@
+schemaVersion: "1.0"
+id: qa
+version: 1
+description: QA verification stays read-only against the system under test and requires independent review of results before any follow-up mutation is authorized.
+appliesTo:
+  - QA
+incompatibleWith: []
+rules:
+  requireIndependentReview: true
+  requireExecutionApprovalForMutation: true
+  maximumMutationClass: READ_ONLY
+  maxReviewRounds: 2

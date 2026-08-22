@@ -1,0 +1,277 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omp.local/agent-operator/schemas/execution-graph.v1.json",
+  "title": "ExecutionGraph.v1",
+  "description": "ExecutionGraph.v1 (plan §4, §7): the compiled, session-bound instantiation of a WorkflowTemplate.",
+  "type": "object",
+  "properties": {
+    "graphId": {
+      "type": "string",
+      "description": "Execution graph identifier.",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "graphRevision": {
+      "type": "integer",
+      "description": "Monotonic revision counter; bound by HumanGate.graphRevision approvals.",
+      "minimum": 1
+    },
+    "workflowTemplateId": {
+      "type": "string",
+      "description": "Source WorkflowTemplate.templateId.",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9-]*\\.v[0-9]+$"
+    },
+    "executionShape": {
+      "$ref": "#/$defs/ExecutionShape"
+    },
+    "nodes": {
+      "type": "array",
+      "description": "Instantiated graph nodes.",
+      "items": {
+        "$ref": "#/$defs/ExecutionGraphNode"
+      },
+      "minItems": 1
+    },
+    "graphHash": {
+      "type": "string",
+      "description": "Content hash of the compiled graph; bound by HumanGate.graphHash approvals.",
+      "minLength": 1,
+      "maxLength": 2000,
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "graphId",
+    "graphRevision",
+    "workflowTemplateId",
+    "executionShape",
+    "nodes",
+    "graphHash"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "executionShape": {
+            "enum": [
+              "PARALLEL",
+              "COUNCIL"
+            ]
+          }
+        },
+        "required": [
+          "executionShape"
+        ]
+      },
+      "then": {
+        "properties": {
+          "nodes": {
+            "contains": {
+              "required": [
+                "groupId"
+              ]
+            },
+            "minContains": 2
+          }
+        }
+      },
+      "$comment": "Structural parity only: requires at least 2 nodes to declare a groupId when executionShape is PARALLEL or COUNCIL. JSON Schema draft 2020-12 cannot assert that those nodes share the same groupId value (grouping/cardinality-by-value across array items is outside the vocabulary), so 'at least one group has 2+ members' and the pre-existing exactly-one-synthesisOwner-per-group invariant must be enforced by validators/tests, not this schema."
+    }
+  ],
+  "$defs": {
+    "ContextPolicy": {
+      "type": "string",
+      "description": "Context isolation policy for a node's inputs (plan §11).",
+      "enum": [
+        "shared",
+        "isolated",
+        "summary-only",
+        "artifact-only",
+        "evidence-only"
+      ]
+    },
+    "ExecutionGraphNode": {
+      "type": "object",
+      "description": "One instantiated ExecutionGraph node (plan §4, §7).",
+      "properties": {
+        "nodeId": {
+          "$ref": "#/$defs/NodeIdRef"
+        },
+        "capabilityId": {
+          "type": "string",
+          "description": "Assigned CapabilityRecord.id.",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "role": {
+          "type": "string",
+          "description": "Template role name this node fills.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "requiredCapability": {
+          "type": "string",
+          "description": "Stage-7 v2 exact required capability identity; omitted on frozen v1 graphs.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "mandatory": {
+          "type": "boolean",
+          "description": "Mandatory-node failure prevents workflow success (plan §7)."
+        },
+        "dependsOn": {
+          "type": "array",
+          "description": "nodeIds this node depends on.",
+          "items": {
+            "$ref": "#/$defs/NodeIdRef"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "groupId": {
+          "type": "string",
+          "description": "Parallel/council group identifier, when this node is part of one.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "synthesisOwner": {
+          "type": "boolean",
+          "description": "Whether this node is the required operator-synthesis owner for its group (plan §7)."
+        },
+        "verificationOwnerNodeId": {
+          "type": "string",
+          "description": "Independent verification-owner nodeId. Required and distinct from nodeId whenever mutation is present.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "mutation": {
+          "$ref": "#/$defs/MutationMetadata"
+        },
+        "contextPolicy": {
+          "$ref": "#/$defs/ContextPolicy"
+        },
+        "consumes": {
+          "type": "array",
+          "description": "Artifact contract types this node consumes (plan §11).",
+          "items": {
+            "type": "string",
+            "description": "Artifact type id.",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9-]*\\.v[0-9]+$"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "produces": {
+          "type": "array",
+          "description": "Artifact contract types this node produces (plan §11).",
+          "items": {
+            "type": "string",
+            "description": "Artifact type id.",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9-]*\\.v[0-9]+$"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "nodeId",
+        "capabilityId",
+        "role",
+        "mandatory",
+        "dependsOn",
+        "contextPolicy",
+        "consumes",
+        "produces"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "mutation"
+            ]
+          },
+          "then": {
+            "required": [
+              "verificationOwnerNodeId"
+            ]
+          }
+        }
+      ]
+    },
+    "ExecutionShape": {
+      "type": "string",
+      "description": "V1 execution shape (plan §6).",
+      "enum": [
+        "DIRECT",
+        "SINGLE",
+        "PARALLEL",
+        "PIPELINE",
+        "COUNCIL",
+        "EXTERNAL"
+      ]
+    },
+    "MutationClass": {
+      "type": "string",
+      "description": "Declared/instantiated mutation class for a node (plan §4).",
+      "enum": [
+        "READ_ONLY",
+        "LOCAL",
+        "EXTERNAL",
+        "DESTRUCTIVE"
+      ]
+    },
+    "MutationMetadata": {
+      "type": "object",
+      "description": "Concrete mutation metadata attached to an instantiated ExecutionGraph node (plan §4 idempotency).",
+      "properties": {
+        "mutationId": {
+          "type": "string",
+          "description": "Idempotency key for this mutation.",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "mutationClass": {
+          "$ref": "#/$defs/MutationClass"
+        },
+        "retryPolicy": {
+          "$ref": "#/$defs/RetryPolicy"
+        }
+      },
+      "required": [
+        "mutationId",
+        "mutationClass",
+        "retryPolicy"
+      ],
+      "additionalProperties": false
+    },
+    "NodeIdRef": {
+      "type": "string",
+      "description": "Graph/template nodeId reference.",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "RetryPolicy": {
+      "type": "string",
+      "description": "Adapter-declared retry policy for a mutation node (plan §4).",
+      "enum": [
+        "AUTOMATIC",
+        "RECONCILE_FIRST",
+        "NEVER_AUTOMATIC",
+        "REQUIRES_HUMAN_GATE"
+      ]
+    }
+  }
+}

@@ -1,0 +1,811 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omp.local/agent-operator/schemas/final-operator-result.v1.json",
+  "title": "FinalOperatorResult.v1",
+  "description": "FinalOperatorResult.v1 (plan §14): the one decision-oriented terminal result rendered to the human. Only Agent Operator produces this; leaf agents recommend dispositions for their own findings only. Contains no chain-of-thought fields.",
+  "type": "object",
+  "properties": {
+    "identity": {
+      "$ref": "#/$defs/FinalOperatorResultIdentity"
+    },
+    "status": {
+      "$ref": "#/$defs/FinalOperatorResultStatus"
+    },
+    "decision": {
+      "$ref": "#/$defs/FinalOperatorResultDecision"
+    },
+    "humanDecision": {
+      "$ref": "#/$defs/FinalOperatorResultHumanDecision"
+    },
+    "scope": {
+      "$ref": "#/$defs/FinalOperatorResultScope"
+    },
+    "execution": {
+      "$ref": "#/$defs/FinalOperatorResultExecution"
+    },
+    "verification": {
+      "$ref": "#/$defs/VerificationState"
+    },
+    "findings": {
+      "$ref": "#/$defs/FinalOperatorResultFindings"
+    },
+    "risk": {
+      "$ref": "#/$defs/FinalOperatorResultRisk"
+    },
+    "evidence": {
+      "$ref": "#/$defs/FinalOperatorResultEvidence"
+    },
+    "artifacts": {
+      "$ref": "#/$defs/FinalOperatorResultArtifacts"
+    },
+    "policy": {
+      "$ref": "#/$defs/FinalOperatorResultPolicy"
+    },
+    "usage": {
+      "$ref": "#/$defs/UsageStats"
+    },
+    "next": {
+      "$ref": "#/$defs/FinalOperatorResultNext"
+    }
+  },
+  "required": [
+    "identity",
+    "status",
+    "decision",
+    "humanDecision",
+    "scope",
+    "execution",
+    "verification",
+    "findings",
+    "risk",
+    "evidence",
+    "artifacts",
+    "policy",
+    "usage",
+    "next"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "Confidence": {
+      "type": "string",
+      "description": "Confidence/abstention tier (plan §6). LOW never automatically selects a more expensive model or council.",
+      "enum": [
+        "HIGH",
+        "MEDIUM",
+        "LOW"
+      ]
+    },
+    "ExecutionStatus": {
+      "type": "string",
+      "description": "Typed execution status (plan §14), independent of workflowStatus.",
+      "enum": [
+        "NOT_STARTED",
+        "RUNNING",
+        "SUCCEEDED",
+        "PARTIAL",
+        "FAILED",
+        "CANCELLED",
+        "UNKNOWN"
+      ]
+    },
+    "FinalOperatorResultArtifacts": {
+      "type": "object",
+      "description": "Artifacts block of FinalOperatorResult.v1.",
+      "properties": {
+        "artifactRefs": {
+          "type": "array",
+          "description": "ArtifactManifest.artifactId refs.",
+          "items": {
+            "type": "string",
+            "description": "artifactId reference.",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "artifactRefs"
+      ],
+      "additionalProperties": false
+    },
+    "FinalOperatorResultDecision": {
+      "type": "object",
+      "description": "Decision block of FinalOperatorResult.v1.",
+      "properties": {
+        "recommendation": {
+          "$ref": "#/$defs/Recommendation"
+        },
+        "recommendationRationale": {
+          "type": "string",
+          "description": "Mandatory. Must cite: conditions satisfied, conditions unsatisfied, blockers considered, deferred findings considered, remaining risk, and the exact policy rules producing the recommendation (plan §14).",
+          "minLength": 40,
+          "maxLength": 4000
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        }
+      },
+      "required": [
+        "recommendation",
+        "recommendationRationale",
+        "confidence"
+      ],
+      "additionalProperties": false
+    },
+    "FinalOperatorResultEvidence": {
+      "type": "object",
+      "description": "Evidence block of FinalOperatorResult.v1.",
+      "properties": {
+        "evidenceRefs": {
+          "type": "array",
+          "description": "Evidence.evidenceId refs.",
+          "items": {
+            "type": "string",
+            "description": "evidenceId reference.",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "evidenceRefs"
+      ],
+      "additionalProperties": false
+    },
+    "FinalOperatorResultExecution": {
+      "type": "object",
+      "description": "Execution block of FinalOperatorResult.v1. actionsNotPerformed explicitly names omitted actions (commit, push, merge, Jira transition, deployment, production mutation, publication); \"implementation complete\" never implies these occurred (plan §14).",
+      "properties": {
+        "workPerformed": {
+          "type": "array",
+          "description": "Concise, decision-oriented statements of work performed; never a raw reasoning trace.",
+          "items": {
+            "type": "string",
+            "description": "Work item summary.",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "minItems": 0
+        },
+        "changesMade": {
+          "type": "array",
+          "description": "Concise statements of concrete changes made.",
+          "items": {
+            "type": "string",
+            "description": "Change summary.",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "minItems": 0
+        },
+        "actionsNotPerformed": {
+          "type": "array",
+          "description": "Explicitly omitted actions, e.g. commit, push, deployment.",
+          "items": {
+            "type": "string",
+            "description": "Omitted action description.",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "minItems": 0
+        }
+      },
+      "required": [
+        "workPerformed",
+        "changesMade",
+        "actionsNotPerformed"
+      ],
+      "additionalProperties": false
+    },
+    "FinalOperatorResultFindings": {
+      "type": "object",
+      "description": "Findings block of FinalOperatorResult.v1: findingId references bucketed by disposition.",
+      "properties": {
+        "fundamentalBlockers": {
+          "type": "array",
+          "description": "Finding.findingId refs.",
+          "items": {
+            "$ref": "#/$defs/FindingIdRef"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "blockingFindings": {
+          "type": "array",
+          "description": "Finding.findingId refs.",
+          "items": {
+            "$ref": "#/$defs/FindingIdRef"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "nonBlockingFindings": {
+          "type": "array",
+          "description": "Finding.findingId refs.",
+          "items": {
+            "$ref": "#/$defs/FindingIdRef"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "deferredFindings": {
+          "type": "array",
+          "description": "Finding.findingId refs.",
+          "items": {
+            "$ref": "#/$defs/FindingIdRef"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "observations": {
+          "type": "array",
+          "description": "Human-readable observations, including explicit provider limitations.",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "fundamentalBlockers",
+        "blockingFindings",
+        "nonBlockingFindings",
+        "deferredFindings",
+        "observations"
+      ],
+      "additionalProperties": false
+    },
+    "FinalOperatorResultHumanDecision": {
+      "type": "object",
+      "description": "Human-decision block of FinalOperatorResult.v1.",
+      "properties": {
+        "required": {
+          "type": "boolean",
+          "description": "Whether a human decision is required to progress."
+        },
+        "gateId": {
+          "type": "string",
+          "description": "Open HumanGate.gateId. Required when required is true.",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "decisionType": {
+          "$ref": "#/$defs/GateDecisionType"
+        },
+        "options": {
+          "type": "array",
+          "description": "Options offered by the gate. Required and non-empty when required is true.",
+          "items": {
+            "type": "string",
+            "description": "Option token.",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "recommendedOption": {
+          "type": "string",
+          "description": "Operator-recommended option.",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "required"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "required": {
+                "const": true
+              }
+            },
+            "required": [
+              "required"
+            ]
+          },
+          "then": {
+            "required": [
+              "gateId",
+              "decisionType",
+              "options"
+            ],
+            "properties": {
+              "options": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "FinalOperatorResultIdentity": {
+      "type": "object",
+      "description": "Identity block of FinalOperatorResult.v1 (plan §14).",
+      "properties": {
+        "operatorSessionId": {
+          "type": "string",
+          "description": "Owning OperatorSession.operatorSessionId.",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "workflowTemplate": {
+          "type": "string",
+          "description": "WorkflowTemplate.templateId used.",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9-]*\\.v[0-9]+$"
+        },
+        "graphRevision": {
+          "type": "integer",
+          "description": "ExecutionGraph.graphRevision at terminal synthesis.",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "operatorSessionId",
+        "workflowTemplate",
+        "graphRevision"
+      ],
+      "additionalProperties": false
+    },
+    "FinalOperatorResultNext": {
+      "type": "object",
+      "description": "Next-actions block of FinalOperatorResult.v1. Permission (allowedActions) and recommendation are never conflated.",
+      "properties": {
+        "allowedActions": {
+          "type": "array",
+          "description": "Policy-permitted next steps.",
+          "items": {
+            "type": "string",
+            "description": "Action token.",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "recommendedAction": {
+          "type": "string",
+          "description": "At most one action; must be a member of allowedActions when present.",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "allowedActions"
+      ],
+      "additionalProperties": false
+    },
+    "FinalOperatorResultPolicy": {
+      "type": "object",
+      "description": "Policy block of FinalOperatorResult.v1.",
+      "properties": {
+        "policyRefs": {
+          "type": "array",
+          "description": "Versioned policy citations for the terminal result.",
+          "items": {
+            "$ref": "#/$defs/PolicyRef"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "policyRefs"
+      ],
+      "additionalProperties": false
+    },
+    "FinalOperatorResultRisk": {
+      "type": "object",
+      "description": "Risk block of FinalOperatorResult.v1.",
+      "properties": {
+        "remainingRisks": {
+          "type": "array",
+          "description": "Remaining-risk statements.",
+          "items": {
+            "type": "string",
+            "description": "Risk statement.",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "minItems": 0
+        }
+      },
+      "required": [
+        "remainingRisks"
+      ],
+      "additionalProperties": false
+    },
+    "FinalOperatorResultScope": {
+      "type": "object",
+      "description": "Scope block of FinalOperatorResult.v1. Scope compliance and behavioral verification are separate decisions.",
+      "properties": {
+        "scopeStatus": {
+          "$ref": "#/$defs/ScopeStatus"
+        },
+        "requirementCoverage": {
+          "$ref": "#/$defs/RequirementCoverage"
+        },
+        "deviations": {
+          "type": "array",
+          "description": "Every approved or detected scope deviation.",
+          "items": {
+            "$ref": "#/$defs/ScopeDeviation"
+          },
+          "minItems": 0
+        }
+      },
+      "required": [
+        "scopeStatus",
+        "requirementCoverage",
+        "deviations"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "scopeStatus": {
+                "const": "IN_SCOPE_WITH_APPROVED_DEVIATION"
+              }
+            },
+            "required": [
+              "scopeStatus"
+            ]
+          },
+          "then": {
+            "properties": {
+              "deviations": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/ScopeDeviation"
+                    },
+                    {
+                      "properties": {
+                        "approved": {
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "approved"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "scopeStatus": {
+                "const": "SCOPE_DRIFT_DETECTED"
+              }
+            },
+            "required": [
+              "scopeStatus"
+            ]
+          },
+          "then": {
+            "properties": {
+              "deviations": {
+                "type": "array",
+                "minItems": 1,
+                "contains": {
+                  "properties": {
+                    "approved": {
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "approved"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "FinalOperatorResultStatus": {
+      "type": "object",
+      "description": "Status block of FinalOperatorResult.v1. executionStatus and workflowStatus are independent (plan §14).",
+      "properties": {
+        "executionStatus": {
+          "$ref": "#/$defs/ExecutionStatus"
+        },
+        "workflowStatus": {
+          "$ref": "#/$defs/WorkflowStatus"
+        }
+      },
+      "required": [
+        "executionStatus",
+        "workflowStatus"
+      ],
+      "additionalProperties": false
+    },
+    "FindingIdRef": {
+      "type": "string",
+      "description": "Finding.findingId reference, e.g. SOL-SEC-04.",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "GateDecisionType": {
+      "type": "string",
+      "description": "HumanGate decision category (plan §9, §18).",
+      "enum": [
+        "PLAN_APPROVAL",
+        "EXECUTION_APPROVAL",
+        "RESULT_APPROVAL",
+        "PUBLICATION_APPROVAL",
+        "APPROVE_PROGRESSION",
+        "CUSTOM_DECISION"
+      ]
+    },
+    "PolicyRef": {
+      "type": "string",
+      "description": "Versioned policy citation, e.g. masar@3:review.maxRounds or secure-code@2:independentVerification (plan §5, §6).",
+      "minLength": 3,
+      "maxLength": 256,
+      "pattern": "^[a-z][a-z0-9-]*@[0-9]+:[a-zA-Z0-9_.]+$"
+    },
+    "Recommendation": {
+      "type": "string",
+      "description": "Operator terminal recommendation (plan §14).",
+      "enum": [
+        "GO",
+        "GO_WITH_DEFERRED_ITEMS",
+        "HOLD",
+        "REPLAN",
+        "RETRY",
+        "ESCALATE",
+        "STOP"
+      ]
+    },
+    "RequirementCoverage": {
+      "type": "object",
+      "description": "Aggregate + itemized requirement coverage (plan §14).",
+      "properties": {
+        "items": {
+          "type": "array",
+          "description": "Per-requirement coverage.",
+          "items": {
+            "$ref": "#/$defs/RequirementCoverageItem"
+          },
+          "minItems": 0
+        },
+        "requiredCount": {
+          "type": "integer",
+          "description": "Total required items.",
+          "minimum": 0
+        },
+        "satisfiedCount": {
+          "type": "integer",
+          "description": "Satisfied required items.",
+          "minimum": 0
+        },
+        "unsatisfiedCount": {
+          "type": "integer",
+          "description": "Unsatisfied required items.",
+          "minimum": 0
+        },
+        "deferredCount": {
+          "type": "integer",
+          "description": "Deferred required items.",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "items",
+        "requiredCount",
+        "satisfiedCount",
+        "unsatisfiedCount",
+        "deferredCount"
+      ],
+      "additionalProperties": false
+    },
+    "RequirementCoverageItem": {
+      "type": "object",
+      "description": "Status of one frozen required item (plan §14: passing tests never implies complete requirement coverage).",
+      "properties": {
+        "requirementId": {
+          "type": "string",
+          "description": "Identifier of the frozen requirement.",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "description": {
+          "type": "string",
+          "description": "What the requirement is.",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "status": {
+          "$ref": "#/$defs/RequirementCoverageStatus"
+        }
+      },
+      "required": [
+        "requirementId",
+        "description",
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "RequirementCoverageStatus": {
+      "type": "string",
+      "description": "Status of one frozen required item within requirementCoverage.",
+      "enum": [
+        "SATISFIED",
+        "UNSATISFIED",
+        "DEFERRED"
+      ]
+    },
+    "ScopeDeviation": {
+      "type": "object",
+      "description": "One approved or detected scope deviation (plan §14).",
+      "properties": {
+        "deviationId": {
+          "type": "string",
+          "description": "Deviation identifier.",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "description": {
+          "type": "string",
+          "description": "What deviated from the frozen scope.",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "approved": {
+          "type": "boolean",
+          "description": "Whether this deviation was explicitly approved."
+        },
+        "policyRefs": {
+          "type": "array",
+          "description": "Versioned policy citations for this deviation.",
+          "items": {
+            "$ref": "#/$defs/PolicyRef"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "deviationId",
+        "description",
+        "approved",
+        "policyRefs"
+      ],
+      "additionalProperties": false
+    },
+    "ScopeStatus": {
+      "type": "string",
+      "description": "Scope compliance status (plan §14), separate from behavioral verification.",
+      "enum": [
+        "IN_SCOPE",
+        "IN_SCOPE_WITH_APPROVED_DEVIATION",
+        "SCOPE_DRIFT_DETECTED"
+      ]
+    },
+    "UsageStats": {
+      "type": "object",
+      "description": "Usage/cost block of FinalOperatorResult.v1.",
+      "properties": {
+        "providers": {
+          "type": "array",
+          "description": "Providers used, e.g. omp-role, claude, codex.",
+          "items": {
+            "type": "string",
+            "description": "Provider name.",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "models": {
+          "type": "array",
+          "description": "Models used.",
+          "items": {
+            "type": "string",
+            "description": "Model identifier.",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "tokens": {
+          "type": ["integer", "null"],
+          "description": "Total tokens consumed when exposed by the provider; null means unavailable.",
+          "minimum": 0
+        },
+        "cost": {
+          "type": ["number", "null"],
+          "description": "Total cost when exposed by the provider; null means unavailable.",
+          "minimum": 0
+        },
+        "duration": {
+          "type": "integer",
+          "description": "Total wall-clock duration in milliseconds.",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "providers",
+        "models",
+        "tokens",
+        "cost",
+        "duration"
+      ],
+      "additionalProperties": false
+    },
+    "VerificationOutcome": {
+      "type": "string",
+      "description": "Outcome of one verification dimension.",
+      "enum": [
+        "NOT_APPLICABLE",
+        "NOT_STARTED",
+        "IN_PROGRESS",
+        "PASSED",
+        "FAILED"
+      ]
+    },
+    "VerificationState": {
+      "type": "object",
+      "description": "The four independently-owned verification dimensions (plan §7, §14).",
+      "properties": {
+        "behavioralVerification": {
+          "$ref": "#/$defs/VerificationOutcome"
+        },
+        "conformanceVerification": {
+          "$ref": "#/$defs/VerificationOutcome"
+        },
+        "independentReview": {
+          "$ref": "#/$defs/VerificationOutcome"
+        },
+        "adversarialReview": {
+          "$ref": "#/$defs/VerificationOutcome"
+        }
+      },
+      "required": [
+        "behavioralVerification",
+        "conformanceVerification",
+        "independentReview",
+        "adversarialReview"
+      ],
+      "additionalProperties": false
+    },
+    "WorkflowStatus": {
+      "type": "string",
+      "description": "Typed workflow status (plan §14), independent of executionStatus.",
+      "enum": [
+        "COMPLETED",
+        "COMPLETED_WITH_DEFERRED_ITEMS",
+        "HUMAN_DECISION_REQUIRED",
+        "BLOCKED",
+        "NEEDS_REPLAN",
+        "FAILED",
+        "CANCELLED",
+        "DECLINED"
+      ]
+    }
+  }
+}

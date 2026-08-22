@@ -1,0 +1,14 @@
+schemaVersion: "1.0"
+id: masar
+version: 1
+description: Bounded scope-freeze governance for planning and implementation work, forcing a human decision instead of an open-ended review loop.
+appliesTo:
+  - PLAN
+  - IMPLEMENT
+  - REVIEW
+incompatibleWith: []
+rules:
+  requireScopeFreeze: true
+  requireHumanFinalApproval: true
+  requireIndependentReview: true
+  maxReviewRounds: 2

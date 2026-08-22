@@ -1,0 +1,249 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omp.local/agent-operator/schemas/capability-record.v1.json",
+  "title": "CapabilityRecord.v1",
+  "description": "CapabilityRecord.v1 (plan §10): a discoverable OMP role or external CLI a workflow node may be bound to, with health/probe/budget metadata.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Capability identifier.",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "kind": {
+      "$ref": "#/$defs/CapabilityKind"
+    },
+    "capabilities": {
+      "type": "array",
+      "description": "Capability tags this provider satisfies.",
+      "items": {
+        "type": "string",
+        "description": "Capability tag.",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[a-z][a-z0-9-]*$"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "mutability": {
+      "$ref": "#/$defs/Mutability"
+    },
+    "modelTiers": {
+      "type": "array",
+      "description": "Model tiers this provider satisfies.",
+      "items": {
+        "$ref": "#/$defs/ModelTier"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "tools": {
+      "type": "array",
+      "description": "Tool names available to this provider.",
+      "items": {
+        "type": "string",
+        "description": "Tool name.",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "minItems": 0
+    },
+    "spawns": {
+      "type": "boolean",
+      "description": "Whether this provider may spawn subagents."
+    },
+    "supports": {
+      "type": "array",
+      "description": "Execution shapes this provider supports.",
+      "items": {
+        "$ref": "#/$defs/ExecutionShape"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "binary": {
+      "type": "string",
+      "description": "External-cli binary; must be an absolute filesystem path for fleet providers (Stage 9). Required when kind is external-cli.",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "sha256": {
+      "type": "string",
+      "description": "Required 64-hex SHA-256 pin of the external-cli binary contents; absent for omp-role records.",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "versionProbe": {
+      "type": "string",
+      "description": "Optional non-mutating version probe descriptor for an external CLI.",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "authProbe": {
+      "type": "string",
+      "description": "Optional non-mutating authentication probe descriptor for an external CLI.",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "modelProbe": {
+      "type": "string",
+      "description": "Optional non-mutating model-availability probe descriptor for an external CLI.",
+
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "costClass": {
+      "$ref": "#/$defs/CostClass"
+    },
+    "latencyClass": {
+      "$ref": "#/$defs/LatencyClass"
+    },
+    "concurrency": {
+      "type": "integer",
+      "description": "Configured concurrency ceiling for this provider.",
+      "minimum": 1,
+      "maximum": 256
+    },
+    "health": {
+      "$ref": "#/$defs/HealthStatus"
+    },
+    "source": {
+      "type": "string",
+      "description": "Free-form provenance description of this capability record.",
+      "minLength": 1,
+      "maxLength": 512
+    }
+  },
+  "required": [
+    "id",
+    "kind",
+    "capabilities",
+    "mutability",
+    "modelTiers",
+    "tools",
+    "spawns",
+    "supports",
+    "costClass",
+    "latencyClass",
+    "concurrency",
+    "health",
+    "source"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "external-cli"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "required": [
+          "binary",
+          "sha256"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "omp-role"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "binary"
+              ]
+            },
+            {
+              "required": [
+                "sha256"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "CapabilityKind": {
+      "type": "string",
+      "description": "Capability provider kind (plan §10).",
+      "enum": [
+        "omp-role",
+        "external-cli"
+      ]
+    },
+    "CostClass": {
+      "type": "string",
+      "description": "Relative cost class of invoking this capability.",
+      "enum": [
+        "LOW",
+        "MEDIUM",
+        "HIGH"
+      ]
+    },
+    "ExecutionShape": {
+      "type": "string",
+      "description": "V1 execution shape (plan §6).",
+      "enum": [
+        "DIRECT",
+        "SINGLE",
+        "PARALLEL",
+        "PIPELINE",
+        "COUNCIL",
+        "EXTERNAL"
+      ]
+    },
+    "HealthStatus": {
+      "type": "string",
+      "description": "Last-probed health of a capability provider.",
+      "enum": [
+        "HEALTHY",
+        "DEGRADED",
+        "UNAVAILABLE",
+        "UNKNOWN"
+      ]
+    },
+    "LatencyClass": {
+      "type": "string",
+      "description": "Relative latency class of invoking this capability.",
+      "enum": [
+        "LOW",
+        "MEDIUM",
+        "HIGH"
+      ]
+    },
+    "ModelTier": {
+      "type": "string",
+      "description": "Model capability tier a capability record declares support for.",
+      "enum": [
+        "LOW",
+        "MEDIUM",
+        "HIGH"
+      ]
+    },
+    "Mutability": {
+      "type": "string",
+      "description": "Coarse mutability declared by a capability provider.",
+      "enum": [
+        "READ_ONLY",
+        "MUTATING"
+      ]
+    }
+  }
+}

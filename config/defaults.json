@@ -1,0 +1,125 @@
+{
+  "schemaVersion": "1.0",
+  "workflow": "default",
+  "defaultPolicyPacks": [
+    "default"
+  ],
+  "budgetProfile": "BALANCED",
+  "maxConcurrency": 3,
+  "features": {
+    "automaticRouting": false,
+    "externalProviders": false,
+    "councilMode": false,
+    "autoFallback": false,
+    "persistentState": true,
+    "costTracking": true
+  },
+  "rules": {
+    "humanIsFinalApprover": true,
+    "implementerSelfApproval": false,
+    "automaticCommit": false,
+    "automaticPush": false,
+    "automaticMerge": false,
+    "independentVerification": true,
+    "adversarialReviewForHighRisk": true,
+    "scopeFreezeRequired": false,
+    "maxReviewRounds": 2
+  },
+  "capabilityAssignments": {
+    "context-preflight": {
+      "preferred": "omp-task-native-planner-v1",
+      "fallbacks": [],
+      "fallbackPolicy": "DISABLED"
+    },
+    "planner": {
+      "preferred": "omp-task-native-planner-v1",
+      "fallbacks": [],
+      "fallbackPolicy": "DISABLED"
+    },
+    "independent-reviewer": {
+      "preferred": "omp-task-native-reviewer-v1",
+      "fallbacks": [],
+      "fallbackPolicy": "DISABLED"
+    },
+    "scope-freeze": {
+      "preferred": "omp-task-native-reviewer-v1",
+      "fallbacks": [],
+      "fallbackPolicy": "DISABLED"
+    },
+    "adversarial-reviewer": {
+      "preferred": "omp-task-native-reviewer-v1",
+      "fallbacks": [],
+      "fallbackPolicy": "DISABLED"
+    },
+    "operator-synthesis": {
+      "preferred": "omp-task-native-synthesis-v1",
+      "fallbacks": [],
+      "fallbackPolicy": "DISABLED"
+    },
+    "plan-context-loader": {
+      "preferred": "omp-task-native-planner-v1",
+      "fallbacks": [],
+      "fallbackPolicy": "DISABLED"
+    },
+    "implementer": {
+      "preferred": "mock-implementer-v1",
+      "fallbacks": [],
+      "fallbackPolicy": "DISABLED"
+    },
+    "behavioral-verifier": {
+      "preferred": "omp-task-native-reviewer-v1",
+      "fallbacks": [],
+      "fallbackPolicy": "DISABLED"
+    },
+    "conformance-verifier": {
+      "preferred": "omp-task-native-reviewer-v1",
+      "fallbacks": [],
+      "fallbackPolicy": "DISABLED"
+    },
+    "qa-preflight": {
+      "preferred": "omp-task-native-planner-v1",
+      "fallbacks": [],
+      "fallbackPolicy": "DISABLED"
+    },
+    "qa-executor": {
+      "preferred": "mock-qa-executor-v1",
+      "fallbacks": [],
+      "fallbackPolicy": "DISABLED"
+    },
+    "evidence-collector": {
+      "preferred": "omp-task-native-reviewer-v1",
+      "fallbacks": [],
+      "fallbackPolicy": "DISABLED"
+    },
+    "security-reviewer": {
+      "preferred": "omp-task-native-reviewer-v1",
+      "fallbacks": [],
+      "fallbackPolicy": "DISABLED"
+    },
+    "ui-designer": {
+      "preferred": "omp-task-native-planner-v1",
+      "fallbacks": [],
+      "fallbackPolicy": "DISABLED"
+    },
+    "ui-implementer": {
+      "preferred": "mock-ui-implementer-v1",
+      "fallbacks": [],
+      "fallbackPolicy": "DISABLED"
+    },
+    "visual-verifier": {
+      "preferred": "omp-task-native-reviewer-v1",
+      "fallbacks": [],
+      "fallbackPolicy": "DISABLED"
+    },
+    "researcher": {
+      "preferred": "omp-task-native-planner-v1",
+      "fallbacks": [],
+      "fallbackPolicy": "DISABLED"
+    },
+    "research-synthesizer": {
+      "preferred": "omp-task-native-synthesis-v1",
+      "fallbacks": [],
+      "fallbackPolicy": "DISABLED"
+    }
+  }
+}

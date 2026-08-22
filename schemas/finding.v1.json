@@ -1,0 +1,308 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omp.local/agent-operator/schemas/finding.v1.json",
+  "title": "Finding.v1",
+  "description": "Finding.v1 (plan §8): a reviewer-reported finding. reportedClassification is reviewer-owned; effectiveDisposition is deterministic-policy-owned and links the auditable PolicyDecision that produced it. A reviewer cannot start another round or promote its own finding's disposition.",
+  "type": "object",
+  "properties": {
+    "findingId": {
+      "$ref": "#/$defs/FindingIdRef"
+    },
+    "producer": {
+      "type": "string",
+      "description": "Role or nodeId that produced this finding.",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "category": {
+      "$ref": "#/$defs/FindingCategory"
+    },
+    "severity": {
+      "$ref": "#/$defs/Severity"
+    },
+    "reportedClassification": {
+      "$ref": "#/$defs/FindingReportedClassification"
+    },
+    "effectiveDisposition": {
+      "$ref": "#/$defs/FindingEffectiveDisposition"
+    },
+    "summary": {
+      "type": "string",
+      "description": "Concise finding summary.",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "impact": {
+      "type": "string",
+      "description": "Concrete impact if unaddressed.",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "evidenceRefs": {
+      "type": "array",
+      "description": "Evidence.evidenceId refs grounding this finding.",
+      "items": {
+        "type": "string",
+        "description": "evidenceId reference.",
+        "minLength": 1,
+        "maxLength": 256
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "recommendedAction": {
+      "type": "string",
+      "description": "The producer's recommended action.",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "blocksProgression": {
+      "type": "boolean",
+      "description": "Whether this finding currently blocks workflow progression."
+    },
+    "introducedAtRound": {
+      "type": "integer",
+      "description": "Review round in which this finding was first raised.",
+      "minimum": 1
+    },
+    "status": {
+      "$ref": "#/$defs/FindingStatus"
+    },
+    "policyRefs": {
+      "type": "array",
+      "description": "Versioned policy citations for this finding's disposition.",
+      "items": {
+        "$ref": "#/$defs/PolicyRef"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "policyDecisionId": {
+      "type": "string",
+      "description": "PolicyDecision.decisionId that produced effectiveDisposition.",
+      "minLength": 1,
+      "maxLength": 256
+    }
+  },
+  "required": [
+    "findingId",
+    "producer",
+    "category",
+    "severity",
+    "reportedClassification",
+    "effectiveDisposition",
+    "summary",
+    "impact",
+    "evidenceRefs",
+    "recommendedAction",
+    "blocksProgression",
+    "introducedAtRound",
+    "status",
+    "policyRefs",
+    "policyDecisionId"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "reportedClassification": {
+            "const": "FUNDAMENTAL_BLOCKER"
+          }
+        },
+        "required": [
+          "reportedClassification"
+        ]
+      },
+      "then": {
+        "properties": {
+          "effectiveDisposition": {
+            "const": "BLOCK"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "reportedClassification": {
+            "const": "OBSERVATION"
+          }
+        },
+        "required": [
+          "reportedClassification"
+        ]
+      },
+      "then": {
+        "properties": {
+          "effectiveDisposition": {
+            "const": "RECORD"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "reportedClassification": {
+            "const": "BLOCKING"
+          }
+        },
+        "required": [
+          "reportedClassification"
+        ]
+      },
+      "then": {
+        "properties": {
+          "effectiveDisposition": {
+            "enum": [
+              "CORRECT",
+              "HUMAN_DECISION"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "reportedClassification": {
+            "const": "NON_BLOCKING"
+          }
+        },
+        "required": [
+          "reportedClassification"
+        ]
+      },
+      "then": {
+        "properties": {
+          "effectiveDisposition": {
+            "enum": [
+              "CONTINUE",
+              "DEFER"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "effectiveDisposition": {
+            "enum": [
+              "BLOCK",
+              "HUMAN_DECISION",
+              "CORRECT"
+            ]
+          }
+        },
+        "required": [
+          "effectiveDisposition"
+        ]
+      },
+      "then": {
+        "properties": {
+          "blocksProgression": {
+            "const": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "effectiveDisposition": {
+            "enum": [
+              "CONTINUE",
+              "DEFER",
+              "RECORD"
+            ]
+          }
+        },
+        "required": [
+          "effectiveDisposition"
+        ]
+      },
+      "then": {
+        "properties": {
+          "blocksProgression": {
+            "const": false
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "FindingCategory": {
+      "type": "string",
+      "description": "Bounded finding category taxonomy.",
+      "enum": [
+        "SECURITY",
+        "CORRECTNESS",
+        "PERFORMANCE",
+        "MAINTAINABILITY",
+        "SCOPE",
+        "POLICY",
+        "PROCESS",
+        "OTHER"
+      ]
+    },
+    "FindingEffectiveDisposition": {
+      "type": "string",
+      "description": "Deterministic policy-engine-owned disposition (plan §8); also reused as the PolicyDecision.decision vocabulary and AgentResult.recommendedDisposition. A human may override only through a named gate.",
+      "enum": [
+        "BLOCK",
+        "CORRECT",
+        "HUMAN_DECISION",
+        "CONTINUE",
+        "DEFER",
+        "RECORD"
+      ]
+    },
+    "FindingIdRef": {
+      "type": "string",
+      "description": "Finding.findingId reference, e.g. SOL-SEC-04.",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "FindingReportedClassification": {
+      "type": "string",
+      "description": "Reviewer-owned finding classification (plan §8). The reviewer owns this field only.",
+      "enum": [
+        "FUNDAMENTAL_BLOCKER",
+        "BLOCKING",
+        "NON_BLOCKING",
+        "OBSERVATION"
+      ]
+    },
+    "FindingStatus": {
+      "type": "string",
+      "description": "Finding lifecycle status, distinct from reportedClassification (reviewer-owned) and effectiveDisposition (policy-owned).",
+      "enum": [
+        "OPEN",
+        "RESOLVED",
+        "DEFERRED",
+        "WONT_FIX"
+      ]
+    },
+    "PolicyRef": {
+      "type": "string",
+      "description": "Versioned policy citation, e.g. masar@3:review.maxRounds or secure-code@2:independentVerification (plan §5, §6).",
+      "minLength": 3,
+      "maxLength": 256,
+      "pattern": "^[a-z][a-z0-9-]*@[0-9]+:[a-zA-Z0-9_.]+$"
+    },
+    "Severity": {
+      "type": "string",
+      "description": "Finding severity.",
+      "enum": [
+        "CRITICAL",
+        "HIGH",
+        "MEDIUM",
+        "LOW",
+        "INFO"
+      ]
+    }
+  }
+}

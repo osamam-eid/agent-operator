@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omp.local/agent-operator/schemas/operator-promotion-decision.v1.json",
+  "title": "OperatorPromotionDecision.v1",
+  "type": "object",
+  "properties": {
+    "comparisonRunId": {
+      "type": "string"
+    },
+    "recommendation": {
+      "enum": [
+        "PROMOTE_RECOMMENDED",
+        "REJECT",
+        "HOLD",
+        "INSUFFICIENT_EVIDENCE"
+      ]
+    },
+    "promotedBySystem": {
+      "const": false
+    },
+    "evidencePackagePath": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "comparisonRunId",
+    "recommendation",
+    "promotedBySystem",
+    "evidencePackagePath"
+  ],
+  "additionalProperties": false
+}
