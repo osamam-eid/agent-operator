@@ -47,7 +47,7 @@ const DIRECT_PHRASES: readonly string[] = [
 
 const FAMILY_PHRASES: Readonly<Record<ScoredFamily, readonly string[]>> = {
   RESEARCH: ['research', 'investigate', 'look into', 'find out', 'survey the', 'explore options', 'compare options', 'what is the difference'],
-  PLAN: ['plan', 'roadmap', 'break down the work', 'scope out', 'proposal for', 'planning session', 'sequence the work'],
+  PLAN: ['plan', 'planing', 'roadmap', 'break down the work', 'scope out', 'proposal for', 'planning session', 'sequence the work'],
   IMPLEMENT: ['implement', 'build the', 'write code', 'fix the bug', 'refactor', 'develop the', 'add a feature', 'code up'],
   REVIEW: ['review', 'code review', 'critique', 'audit the code', 'check my pr', 'evaluate the diff', 'pull request review'],
   UI: ['ui', 'user interface', 'frontend', 'front-end', 'design the interface', 'button layout', 'css', 'screen layout', 'component styling'],

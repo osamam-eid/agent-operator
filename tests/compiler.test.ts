@@ -177,6 +177,17 @@ describe('Stage3WorkflowCompiler global plan', () => {
       'independent-review',
     ]);
   });
+
+  test('compiles the "planing" typo fixture as PLAN with MEDIUM confidence', async () => {
+    const compiler = compilerWith({ projectOverlay: { status: 'ABSENT' } });
+    const result = await compiler.compile('i want to start planing to next role in masar', context());
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.compiled.classification.requestClassification).toBe('PLAN');
+    expect(result.compiled.classification.confidence).toBe('MEDIUM');
+    expect(result.compiled.routeDecision.selectedWorkflow).toBe('plan.v1');
+  });
 });
 
 // ---------------------------------------------------------------------------
