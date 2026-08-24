@@ -120,6 +120,20 @@ export function intelligenceCandidateDigest(candidate: IntelligenceCandidateMani
   return createHash('sha256').update(canonical(candidate), 'utf8').digest('hex');
 }
 
+/** Fail-closed verification that an on-disk candidate manifest is the exact
+ * bundle a promoted pointer authorizes for semantic-primary routing. Any
+ * candidate-id mismatch, missing/malformed semantic digest, or digest
+ * divergence means "stay deterministic" — never an error, never a fallback. */
+export function verifySemanticActivationManifest(
+  pointer: Pick<ActiveIntelligencePointer, 'activeCandidateId' | 'activeDigest'>,
+  manifest: unknown,
+): boolean {
+  if (!isPlainObject(manifest)) return false;
+  if (manifest['candidateId'] !== pointer.activeCandidateId) return false;
+  if (typeof manifest['semanticClassifierDigest'] !== 'string' || !/^[0-9a-f]{64}$/.test(manifest['semanticClassifierDigest'])) return false;
+  return intelligenceCandidateDigest(manifest as unknown as IntelligenceCandidateManifest) === pointer.activeDigest;
+}
+
 export function calibratePredictions(predictions: readonly ConfidencePrediction[], dimension: PredictionDimension, predictionIdentity: string, generatedAt: string): CalibrationReport {
   const compatible = predictions.filter((prediction) => prediction.dimension === dimension && prediction.predictionIdentity === predictionIdentity);
   const bins: CalibrationBin[] = [];

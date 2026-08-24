@@ -79,7 +79,7 @@ import { createShadowRoutingService, FileShadowObservationStore } from '../src/s
 import { createProviderIntelligenceService, FileProviderIntelligenceStore } from '../src/provider-intelligence.js';
 import { createPolicySimulationService } from '../src/policy-simulation.js';
 import { createSemanticCanaryCommand } from '../src/intelligence-activation.js';
-import { FileIntelligenceActivationStore, createIntelligenceActivationService, intelligenceCandidateDigest } from '../src/intelligence-activation.js';
+import { FileIntelligenceActivationStore, createIntelligenceActivationService, verifySemanticActivationManifest } from '../src/intelligence-activation.js';
 import { createIntelligenceLifecycleHandler } from '../src/intelligence-lifecycle.js';
 import { createRecoveryPackagePort, FileRecoveryPackageStore } from '../src/execution-safety.js';
 import type { ArtifactManifest, Evidence, ExecutionGraphNode } from '../src/contracts.js';
@@ -477,9 +477,8 @@ function buildOperatorRuntime(): { handler: (args: string, ctx: ExtensionCommand
       const manifestPath = join(rootDir, 'evaluator', 'intelligence', 'candidates', `${pointer.activeCandidateId}.json`);
       const stats = lstatSync(manifestPath);
       if (!stats.isFile() || stats.isSymbolicLink()) return false;
-      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Parameters<typeof intelligenceActivation.promote>[0]['candidate'];
-      if (typeof manifest.semanticClassifierDigest !== 'string' || !/^[0-9a-f]{64}$/.test(manifest.semanticClassifierDigest)) return false;
-      return intelligenceCandidateDigest(manifest) === pointer.activeDigest;
+      const manifest: unknown = JSON.parse(readFileSync(manifestPath, 'utf8'));
+      return verifySemanticActivationManifest(pointer, manifest);
     } catch {
       return false;
     }
