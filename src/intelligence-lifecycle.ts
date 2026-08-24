@@ -1,4 +1,4 @@
-import { lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 
 import type { OperatorCommandOutcome } from './runtime-types.js';
@@ -6,6 +6,7 @@ import type { OperatorComparison } from './evaluator/contracts.js';
 import { calibratePredictions, intelligenceCandidateDigest, type ConfidencePrediction, type IntelligenceActivationPort, type IntelligenceCandidateManifest, type PredictionDimension } from './intelligence-activation.js';
 import type { ProviderIntelligencePort } from './provider-intelligence.js';
 import type { PredictionLedger } from './prediction-ledger.js';
+import type { ShadowObservation } from './shadow-routing.js';
 import { buildDecisionBrief, evaluateRetention, normalizeEvidence, planAdaptiveContext, type ContextItem, type RawEvidenceReference, type RetentionRecord } from './context-intelligence.js';
 
 export interface IntelligenceLifecycleOptions {
@@ -14,6 +15,8 @@ export interface IntelligenceLifecycleOptions {
   readonly activation: IntelligenceActivationPort;
   readonly intelligence: ProviderIntelligencePort;
   readonly predictions?: PredictionLedger;
+  /** Reader over collected shadow observations for eval-case curation. */
+  readonly shadowObservations?: () => Promise<readonly ShadowObservation[]>;
   readonly baseDigest: string;
   readonly policyDigest: string;
   readonly compilerVersion: string;
@@ -112,6 +115,42 @@ export function createIntelligenceLifecycleHandler(options: IntelligenceLifecycl
           return ok(`exported ${labeled.length} labeled prediction(s) to ${outPath}; unlabeled records excluded.`);
         }
         return fail('predictions requires list, label <id> <correct|incorrect>, or export --out <path>.');
+      }
+      if (action === 'shadow-cases') {
+        const draftsDir = argValue(args, '--drafts-dir') ?? join(options.evaluatorDir, 'drafts');
+        const limitRaw = argValue(args, '--limit');
+        const limit = limitRaw === undefined ? 50 : Number(limitRaw);
+        if (!Number.isInteger(limit) || limit < 1) return fail('--limit must be a positive integer.');
+        const observations = options.shadowObservations === undefined ? [] : await options.shadowObservations();
+        const informative = observations.filter((observation) => {
+          if (typeof observation.requestText !== 'string' || observation.requestText.trim() === '') return false;
+          return observation.candidate.status === 'COMPILED' || observation.candidate.status === 'DO_NOT_EXECUTE';
+        });
+        mkdirSync(draftsDir, { recursive: true, mode: 0o700 });
+        let written = 0;
+        let skipped = 0;
+        for (const observation of informative.sort((first, second) => second.createdAt.localeCompare(first.createdAt))) {
+          if (written >= limit) break;
+          const caseId = `shadow-${observation.observationId.slice(0, 24)}`;
+          if (existsSync(join(draftsDir, `${caseId}.json`))) { skipped += 1; continue; }
+          writeJson(join(draftsDir, `${caseId}.json`), {
+            caseId,
+            sourceSessionId: `shadow:${observation.observationId}`,
+            originalRequest: observation.requestText,
+            disclosure: 'LOCAL_ONLY',
+            curated: false,
+            observed: {
+              requestClassification: observation.primary.family,
+              riskClassification: observation.primary.riskClassification,
+              selectedWorkflow: observation.primary.workflow,
+              requiredGates: [],
+              nodeSummaries: [{ nodeId: 'shadow-candidate', summary: `candidate=${observation.candidate.status}${observation.candidate.family === undefined ? '' : `/${observation.candidate.family}`}${observation.candidate.rawConfidence === undefined ? '' : ` confidence=${observation.candidate.rawConfidence.toFixed(2)}`} divergences=[${observation.divergences.join(',')}]` }],
+              humanOverrideSignals: [],
+            },
+          });
+          written += 1;
+        }
+        return ok(`shadow-cases: ${written} LOCAL_ONLY draft(s) written to ${draftsDir} (${skipped} already present); cases are curated:false until human review.`);
       }
       if (action === 'retention') {
         const inputPath = argValue(args, '--input');

@@ -484,9 +484,10 @@ function buildOperatorRuntime(): { handler: (args: string, ctx: ExtensionCommand
       return false;
     }
   };
+  const shadowStore = new FileShadowObservationStore(join(rootDir, 'shadow'));
   const shadowRouting = createShadowRoutingService({
     classifier: semanticClassifier,
-    store: new FileShadowObservationStore(join(rootDir, 'shadow')),
+    store: shadowStore,
     compileCandidate: (proposal: ClassificationProposal, context) =>
       createStage3WorkflowCompiler({
         ...baseCompilerOptions,
@@ -593,6 +594,7 @@ function buildOperatorRuntime(): { handler: (args: string, ctx: ExtensionCommand
               activation: intelligenceActivation,
               intelligence: providerIntelligence,
               predictions: predictionLedger,
+              shadowObservations: () => shadowStore.list(),
               baseDigest: 'fc62ffa61b5f1b69400eb7b24008546846821d8e809f26657018d794680920db',
               policyDigest: 'wp18-default-policy',
               compilerVersion: 'intelligence-roadmap',

@@ -12,6 +12,7 @@ export interface ShadowRouteSummary {
   readonly family: string;
   readonly workflow: string;
   readonly providers: readonly string[];
+  readonly riskClassification: string;
 }
 
 export interface ShadowCandidateSummary {
@@ -30,6 +31,10 @@ export interface ShadowObservation {
   readonly schemaVersion: '1.0';
   readonly observationId: string;
   readonly requestHash: string;
+  /** Raw request text retained locally for eval-case curation only.
+   * Mirrors the harvest model: LOCAL_ONLY until a human curates the case,
+   * never included in exported/shared observation schemas. */
+  readonly requestText?: string;
   readonly createdAt: string;
   readonly primary: ShadowRouteSummary;
   readonly candidate: ShadowCandidateSummary;
@@ -47,8 +52,8 @@ export interface ShadowRoutingStatus {
   readonly latest?: ShadowObservation;
 }
 
-const OBSERVATION_KEYS = ['schemaVersion', 'observationId', 'requestHash', 'createdAt', 'primary', 'candidate', 'divergences', 'policyRefs'] as const;
-const PRIMARY_KEYS = ['family', 'workflow', 'providers'] as const;
+const OBSERVATION_KEYS = ['schemaVersion', 'observationId', 'requestHash', 'requestText', 'createdAt', 'primary', 'candidate', 'divergences', 'policyRefs'] as const;
+const PRIMARY_KEYS = ['family', 'workflow', 'providers', 'riskClassification'] as const;
 const CANDIDATE_KEYS = ['status', 'family', 'workflow', 'providers', 'disposition', 'rawConfidence', 'modelProvider', 'modelId', 'failureCode'] as const;
 
 function exactKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
@@ -62,13 +67,14 @@ export function validateShadowObservation(value: unknown): value is ShadowObserv
   if (typeof value['requestHash'] !== 'string' || !/^[0-9a-f]{64}$/.test(value['requestHash']) || typeof value['createdAt'] !== 'string' || !Number.isFinite(Date.parse(value['createdAt']))) return false;
   const primary = value['primary'];
   const candidate = value['candidate'];
-  if (!isPlainObject(primary) || !exactKeys(primary, PRIMARY_KEYS) || typeof primary['family'] !== 'string' || typeof primary['workflow'] !== 'string' || !Array.isArray(primary['providers']) || primary['providers'].some((entry) => typeof entry !== 'string')) return false;
+  if (!isPlainObject(primary) || !exactKeys(primary, PRIMARY_KEYS) || typeof primary['family'] !== 'string' || typeof primary['workflow'] !== 'string' || typeof primary['riskClassification'] !== 'string' || !Array.isArray(primary['providers']) || primary['providers'].some((entry) => typeof entry !== 'string')) return false;
   if (!isPlainObject(candidate) || !exactKeys(candidate, CANDIDATE_KEYS)) return false;
   if (typeof candidate['status'] !== 'string' || !['COMPILED', 'DO_NOT_EXECUTE', 'NEEDS_CLARIFICATION', 'BLOCKED_DISCLOSURE', 'FAILED'].includes(candidate['status'])) return false;
   for (const key of ['family', 'workflow', 'modelProvider', 'modelId', 'failureCode']) if (key in candidate && typeof candidate[key] !== 'string') return false;
   if ('providers' in candidate && (!Array.isArray(candidate['providers']) || candidate['providers'].some((entry) => typeof entry !== 'string'))) return false;
   if ('rawConfidence' in candidate && (typeof candidate['rawConfidence'] !== 'number' || candidate['rawConfidence'] < 0 || candidate['rawConfidence'] > 1)) return false;
   if ('disposition' in candidate && (typeof candidate['disposition'] !== 'string' || !['EXECUTE', 'DO_NOT_EXECUTE', 'NEEDS_CLARIFICATION'].includes(candidate['disposition']))) return false;
+  if ('requestText' in value && typeof value['requestText'] !== 'string') return false;
   if (!Array.isArray(value['divergences']) || value['divergences'].some((entry) => typeof entry !== 'string')) return false;
   return Array.isArray(value['policyRefs']) && value['policyRefs'].every((entry) => typeof entry === 'string');
 }
@@ -91,6 +97,7 @@ function routeSummary(compiled: CompiledWorkflow): ShadowRouteSummary {
     family: compiled.classification.requestClassification,
     workflow: compiled.routeDecision.selectedWorkflow,
     providers: [...new Set(compiled.routeDecision.selectedRolesProviders.map((entry) => entry.provider))].sort(),
+    riskClassification: compiled.routeDecision.riskClassification,
   };
 }
 
@@ -185,7 +192,7 @@ export function createShadowRoutingService(options: ShadowRoutingOptions): Shado
               rawConfidence: semantic.rawConfidence,
               modelProvider: semantic.modelProvider,
               modelId: semantic.modelId,
-              failureCode: compiled.code,
+              ...(typeof compiled.code === 'string' && compiled.code.length > 0 ? { failureCode: compiled.code } : {}),
             };
           } else {
             const summary = routeSummary(compiled.compiled);
@@ -202,14 +209,19 @@ export function createShadowRoutingService(options: ShadowRoutingOptions): Shado
           }
         }
       } catch (error) {
-        candidate = { status: 'FAILED', failureCode: error instanceof Error && 'code' in error ? String(error.code) : 'SEMANTIC_CLASSIFIER_FAILED' };
+        const code = error instanceof Error && 'code' in error && typeof error.code === 'string' && error.code.length > 0 ? error.code : 'SEMANTIC_CLASSIFIER_FAILED';
+        candidate = { status: 'FAILED', failureCode: code };
       }
     }
 
+    const disclosureCurationAllowed = primary.disclosureDecision.disclosureClass !== 'LOCAL_ONLY' && !primary.disclosureDecision.sensitiveSignalDetected;
     const identity = observationIdentity(request, createdAt, modelIdentity, context.operatorSessionId);
     const observation: ShadowObservation = {
       schemaVersion: '1.0',
       ...identity,
+      // Raw text is retained for eval-case curation only when disclosure
+      // permits leaving the local boundary; LOCAL_ONLY stays hash-only.
+      ...(disclosureCurationAllowed ? { requestText: request } : {}),
       createdAt,
       primary: primarySummary,
       candidate,
