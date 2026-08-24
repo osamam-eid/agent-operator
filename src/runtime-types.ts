@@ -20,6 +20,7 @@ import type { FailureFingerprint, ProviderFallbackJournal } from './execution-sa
 import type { ProviderIntelligencePort } from './provider-intelligence.js';
 import type { ExecutionEstimate, PolicyDiffReport, PolicySimulationPort } from './policy-simulation.js';
 import type { ProviderCanaryCommandPort } from './intelligence-activation.js';
+import type { PredictionLedger } from './prediction-ledger.js';
 
 /** Typed `/operator` commands implemented by the runtime. Simulation is a
  * distinct command so it can never enter the session persistence path. */
@@ -356,6 +357,8 @@ export interface OperatorRuntimeDependencies {
    * enables semantic-primary routing for this invocation. Omit or false
    * keeps deterministic fixture routing. */
   readonly semanticPrimaryActive?: () => Promise<boolean>;
+  /** Append-only raw prediction telemetry for offline calibration. */
+  readonly predictionLedger?: PredictionLedger;
   /** Passed as `WorkflowCompilerContext.projectRoot` on every `compile()`
    * call: the project directory this runtime instance operates against
    * (config/trust resolution root). */

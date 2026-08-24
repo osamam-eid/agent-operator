@@ -118,6 +118,8 @@ export interface ClassificationProposal {
   readonly requestedExecutionShape?: 'DIRECT' | 'SINGLE' | 'PARALLEL' | 'PIPELINE' | 'COUNCIL';
   readonly requestedBudgetProfile?: BudgetProfile;
   readonly rationale: string;
+  /** Uncalibrated model confidence [0,1]. Present only on semantic proposals. */
+  readonly rawConfidence?: number;
 }
 
 export interface OperatorClassifier {

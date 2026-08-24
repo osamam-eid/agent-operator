@@ -19,6 +19,7 @@ export * from './policy-simulation.js';
 export * from './context-intelligence.js';
 export * from './intelligence-activation.js';
 export * from './intelligence-lifecycle.js';
+export * from './prediction-ledger.js';
 export * from './runtime-types.js';
 export * from './commands.js';
 export * from './controller.js';

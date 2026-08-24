@@ -1,10 +1,11 @@
 import { lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 
 import type { OperatorCommandOutcome } from './runtime-types.js';
 import type { OperatorComparison } from './evaluator/contracts.js';
 import { calibratePredictions, intelligenceCandidateDigest, type ConfidencePrediction, type IntelligenceActivationPort, type IntelligenceCandidateManifest, type PredictionDimension } from './intelligence-activation.js';
 import type { ProviderIntelligencePort } from './provider-intelligence.js';
+import type { PredictionLedger } from './prediction-ledger.js';
 import { buildDecisionBrief, evaluateRetention, normalizeEvidence, planAdaptiveContext, type ContextItem, type RawEvidenceReference, type RetentionRecord } from './context-intelligence.js';
 
 export interface IntelligenceLifecycleOptions {
@@ -12,6 +13,7 @@ export interface IntelligenceLifecycleOptions {
   readonly projectRoot: string;
   readonly activation: IntelligenceActivationPort;
   readonly intelligence: ProviderIntelligencePort;
+  readonly predictions?: PredictionLedger;
   readonly baseDigest: string;
   readonly policyDigest: string;
   readonly compilerVersion: string;
@@ -82,6 +84,34 @@ export function createIntelligenceLifecycleHandler(options: IntelligenceLifecycl
         writeJson(join(reportDir, `normalized-${normalized.normalizedId}.json`), normalized);
         writeJson(join(reportDir, `brief-${brief.briefId}.json`), brief);
         return ok(`evidence brief ${brief.briefId} created; raw evidence remains authoritative.`);
+      }
+      if (action === 'predictions') {
+        const ledger = options.predictions;
+        if (ledger === undefined) return fail('Prediction telemetry is unavailable in this runtime.');
+        const mode = args[1];
+        if (mode === undefined || mode === 'list') {
+          const records = await ledger.list();
+          const labeled = records.filter((record) => record.labeledCorrect !== undefined);
+          return ok(`predictions: ${records.length} recorded, ${labeled.length} labeled (${records.length - labeled.length} awaiting curation).`);
+        }
+        if (mode === 'label') {
+          const predictionId = args[2];
+          const verdict = args[3];
+          if (predictionId === undefined || (verdict !== 'correct' && verdict !== 'incorrect')) return fail('label requires <prediction-id> <correct|incorrect>.');
+          const applied = await ledger.label(predictionId, verdict === 'correct', now());
+          return applied ? ok(`prediction ${predictionId} labeled ${verdict}.`) : fail(`No prediction with id ${predictionId}.`);
+        }
+        if (mode === 'export') {
+          const outPath = argValue(args, '--out');
+          if (outPath === undefined) return fail('export requires --out <path>.');
+          const target = resolve(options.projectRoot, outPath);
+          if (!target.startsWith(resolve(options.projectRoot) + sep)) return fail('export path must stay inside the project root.');
+          const records = await ledger.list();
+          const labeled = records.filter((record) => record.labeledCorrect !== undefined);
+          writeJson(target, labeled.map((record) => ({ predictionId: record.predictionId, dimension: record.dimension, predictionIdentity: record.predictionIdentity, rawConfidence: record.rawConfidence, chosen: record.chosen, correct: record.labeledCorrect, observedAt: record.observedAt, operatorSessionId: record.operatorSessionId })));
+          return ok(`exported ${labeled.length} labeled prediction(s) to ${outPath}; unlabeled records excluded.`);
+        }
+        return fail('predictions requires list, label <id> <correct|incorrect>, or export --out <path>.');
       }
       if (action === 'retention') {
         const inputPath = argValue(args, '--input');

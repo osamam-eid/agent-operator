@@ -199,6 +199,7 @@ export function createSemanticOperatorClassifier(options: SemanticOperatorClassi
         const proposal: ClassificationProposal = {
           ...base,
           confidence,
+          rawConfidence: output.rawConfidence,
           ...(confidence === 'LOW' ? { abstentionReason: 'Semantic confidence is below the execution threshold.' } : {}),
           rationale: `Semantic evidence: ${output.evidence.join('; ')}`,
         };

@@ -38,6 +38,7 @@ import { join, dirname } from 'node:path';
 import { bootstrapCatalog, defaultModelsYamlPath, fleetCatalogPath, loadCatalogFile, mergeCatalog, parseOmpModelsYaml, saveCatalogFile } from './fleet-catalog.js';
 import { validateProviderFallbackJournal } from './execution-safety.js';
 import { estimateCompiledWorkflow } from './policy-simulation.js';
+import { makePredictionRecord } from './prediction-ledger.js';
 import { validateAgentResult } from './validation/results.js';
 import {
   beginExecutionBatch,
@@ -67,7 +68,7 @@ import type {
   OperatorRuntimeDependencies,
   StoredOperatorSession,
 } from './runtime-types.js';
-import type { WorkflowCompilerContext } from './stage3-types.js';
+import type { CompiledWorkflow, WorkflowCompilerContext } from './stage3-types.js';
 
 type LoadedActive = { readonly ok: true; readonly record: StoredOperatorSession } | { readonly ok: false; readonly outcome: OperatorCommandOutcome };
 
@@ -441,6 +442,26 @@ export class OperatorRuntime {
     return enabled ? { semanticPrimary: true } : {};
   }
 
+
+  /** Records one raw CLASSIFICATION prediction when a semantic-primary
+   * compile succeeded. Telemetry only: failures never affect the session. */
+  async #recordPrediction(operatorSessionId: string, compiled: CompiledWorkflow): Promise<void> {
+    const ledger = this.#deps.predictionLedger;
+    if (ledger === undefined) return;
+    const rawConfidence = compiled.classification.rawConfidence;
+    if (rawConfidence === undefined) return;
+    await ledger.append(makePredictionRecord({
+      dimension: 'CLASSIFICATION',
+      predictionIdentity: 'semantic-primary-v1',
+      rawConfidence,
+      chosen: compiled.classification.requestClassification,
+      operatorSessionId,
+      observedAt: this.#deps.clock.now(),
+    })).catch((error) => {
+      process.stderr.write(`[agent-operator] prediction recording failed (session continues): ${error instanceof Error ? error.message : String(error)}\n`);
+    });
+  }
+
   // -------------------------------------------------------------------------
   // START
   // -------------------------------------------------------------------------
@@ -508,6 +529,7 @@ export class OperatorRuntime {
     const persisted = await this.#persist(record);
     if (!persisted.ok) return persisted.outcome;
 
+    if (context.semanticPrimary === true) await this.#recordPrediction(operatorSessionId, compilation.compiled);
     this.#activeSessionId = record.session.operatorSessionId;
     const openedGate = record.gates[0];
     const text =
@@ -554,6 +576,7 @@ export class OperatorRuntime {
       preflight = 'PASSED';
     }
     const compiled = compilation.compiled;
+    if (context.semanticPrimary === true) await this.#recordPrediction(`simulation:${digest}`, compiled);
     return {
       ok: true,
       text: `Simulation compiled workflow "${compiled.template.templateId}" with ${compiled.executionGraph.nodes.length} node(s); no session, gate, provider, tool, or mutation was created.`,

@@ -82,6 +82,7 @@ import { createSemanticCanaryCommand } from '../src/intelligence-activation.js';
 import { FileIntelligenceActivationStore, createIntelligenceActivationService, verifySemanticActivationManifest } from '../src/intelligence-activation.js';
 import { createIntelligenceLifecycleHandler } from '../src/intelligence-lifecycle.js';
 import { createRecoveryPackagePort, FileRecoveryPackageStore } from '../src/execution-safety.js';
+import { FilePredictionLedger } from '../src/prediction-ledger.js';
 import type { ArtifactManifest, Evidence, ExecutionGraphNode } from '../src/contracts.js';
 import { createOperatorRuntime, type OperatorRuntime } from '../src/controller.js';
 import { collectSharedProjectSources, materializeProjection } from '../src/context-projection.js';
@@ -494,6 +495,7 @@ function buildOperatorRuntime(): { handler: (args: string, ctx: ExtensionCommand
   });
   const intelligenceActivation = createIntelligenceActivationService(new FileIntelligenceActivationStore(join(rootDir, 'intelligence-active')));
   const recoveryPort = createRecoveryPackagePort(new FileRecoveryPackageStore(join(rootDir, 'recovery')));
+  const predictionLedger = new FilePredictionLedger(join(rootDir, 'predictions'));
   const providerCanary = createSemanticCanaryCommand({
     classifier: semanticClassifier,
     intelligence: providerIntelligence,
@@ -573,6 +575,7 @@ function buildOperatorRuntime(): { handler: (args: string, ctx: ExtensionCommand
     projectRoot,
     shadowRouting,
     semanticPrimaryActive,
+    predictionLedger,
     registerActiveBatch: coordinator.registerActiveBatch.bind(coordinator),
     providerIntelligence,
     policySimulation,
@@ -589,6 +592,7 @@ function buildOperatorRuntime(): { handler: (args: string, ctx: ExtensionCommand
               projectRoot,
               activation: intelligenceActivation,
               intelligence: providerIntelligence,
+              predictions: predictionLedger,
               baseDigest: 'fc62ffa61b5f1b69400eb7b24008546846821d8e809f26657018d794680920db',
               policyDigest: 'wp18-default-policy',
               compilerVersion: 'intelligence-roadmap',

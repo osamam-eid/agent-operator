@@ -496,7 +496,7 @@ export function validateStoredOperatorSession(input: unknown): ValidationResult<
 // ---------------------------------------------------------------------------
 const SIMULATION_RESULT_KEYS = ['schemaVersion', 'request', 'generatedAt', 'classification', 'disclosureDecision', 'routeDecision', 'executionGraph', 'executionEstimate', 'capabilities', 'decisionTrace', 'preflight'] as const;
 const CAPABILITY_SUMMARY_KEYS = ['nodeId', 'role', 'capabilityId', 'provider', 'tools', 'mutationClass'] as const;
-const CLASSIFICATION_PROPOSAL_KEYS = ['requestClassification', 'riskClassification', 'confidence', 'abstentionReason', 'decomposable', 'semanticCapabilities', 'requestedExecutionShape', 'requestedBudgetProfile', 'rationale'] as const;
+const CLASSIFICATION_PROPOSAL_KEYS = ['requestClassification', 'riskClassification', 'confidence', 'abstentionReason', 'decomposable', 'semanticCapabilities', 'requestedExecutionShape', 'requestedBudgetProfile', 'rationale', 'rawConfidence'] as const;
 
 function validateSimulationResult(input: unknown): ValidationResult<SimulationResultEnvelope> {
   const ctx = newCtx();
@@ -519,6 +519,7 @@ function validateSimulationResult(input: unknown): ValidationResult<SimulationRe
     if (hasOwn(classification, 'abstentionReason')) requireNonEmptyString(ctx, ['classification', 'abstentionReason'], classification.abstentionReason, 4000);
     if (hasOwn(classification, 'requestedExecutionShape')) requireEnum(ctx, ['classification', 'requestedExecutionShape'], classification.requestedExecutionShape, ['DIRECT', 'SINGLE', 'PARALLEL', 'PIPELINE', 'COUNCIL'] as const);
     if (hasOwn(classification, 'requestedBudgetProfile')) requireEnum(ctx, ['classification', 'requestedBudgetProfile'], classification.requestedBudgetProfile, ['CHEAP', 'BALANCED', 'QUALITY', 'CRITICAL'] as const);
+    if (hasOwn(classification, 'rawConfidence')) requireNumber(ctx, ['classification', 'rawConfidence'], classification.rawConfidence, { min: 0 });
   }
   const disclosure = validateRuntimeDisclosureDecision(raw.disclosureDecision);
   if (!disclosure.ok) for (const error of disclosure.errors) pushErr(ctx, ['disclosureDecision', error.path], error.message);
