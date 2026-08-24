@@ -85,7 +85,8 @@ anything else is rejected as `INVALID_COMMAND` rather than guessed at:
   deterministic route with a strict, tool-free semantic candidate. WP13
   never lets the candidate alter the route, graph, gate, provider, or session.
   `LOCAL_ONLY` requests never reach the semantic model. Observations retain a
-  request hash and structured decision evidence, never the raw request.
+  request hash and structured decision evidence — never the raw request unless
+  you explicitly pass `--retain-text` to `shadow evaluate` (opt-in, local-only).
 - **DO_NOT_EXECUTE** (shadow evidence only) — a semantic disposition, not a
   parsed `/operator` command. Requests with this label are recorded in
   shadow observations; they never bypass execution by text.

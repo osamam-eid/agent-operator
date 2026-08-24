@@ -117,7 +117,7 @@ export class OperatorRuntime {
           outcome = await this.#handleCanary(parsed.providerId, parsed.modelId);
           break;
         case 'SHADOW':
-          outcome = await this.#handleShadow(parsed.subcommand, parsed.request, parsed.familyOverride);
+          outcome = await this.#handleShadow(parsed.subcommand, parsed.request, parsed.familyOverride, parsed.retainText === true);
           break;
         case 'COMPETENCE':
           outcome = await this.#handleCompetence(parsed.subcommand, parsed.providerId, parsed.modelId);
@@ -600,6 +600,7 @@ export class OperatorRuntime {
     subcommand: 'ON' | 'OFF' | 'STATUS' | 'EVALUATE',
     request?: string,
     familyOverride?: WorkflowCompilerContext['familyOverride'],
+    retainText?: boolean,
   ): Promise<OperatorCommandOutcome> {
     const shadow = this.#deps.shadowRouting;
     if (shadow === undefined) return { ok: false, text: 'Semantic shadow routing is unavailable in this runtime.', errorCode: 'FEATURE_DISABLED' };
@@ -638,7 +639,7 @@ export class OperatorRuntime {
     };
     const compilation = await this.#deps.compiler.compile(effectiveRequest, context);
     if (!compilation.ok) return { ok: false, text: `Shadow incumbent compilation failed (${compilation.code}): ${compilation.message}`, errorCode: 'COMPILATION_FAILED' };
-    const observation = await shadow.evaluate(effectiveRequest, compilation.compiled, context);
+    const observation = await shadow.evaluate(effectiveRequest, compilation.compiled, context, retainText === true ? { retainRequestText: true } : undefined);
     return {
       ok: true,
       text: `Shadow observation ${observation.observationId}: incumbent ${observation.primary.family}/${observation.primary.workflow}; candidate ${observation.candidate.status}${observation.candidate.family === undefined ? '' : `/${observation.candidate.family}`}; no active route changed.`,

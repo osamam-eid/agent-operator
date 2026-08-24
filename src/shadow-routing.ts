@@ -79,10 +79,16 @@ export function validateShadowObservation(value: unknown): value is ShadowObserv
   return Array.isArray(value['policyRefs']) && value['policyRefs'].every((entry) => typeof entry === 'string');
 }
 
+/** When true, disclosure-safe observations retain raw request text locally
+ * for eval-case curation. Default is hash-only (WP13 privacy guarantee). */
+export interface ShadowRetentionControl {
+  readonly retainRequestText: boolean;
+}
+
 export interface ShadowRoutingPort {
   setEnabled(enabled: boolean): void;
   status(): ShadowRoutingStatus;
-  evaluate(request: string, primary: CompiledWorkflow, context: WorkflowCompilerContext): Promise<ShadowObservation>;
+  evaluate(request: string, primary: CompiledWorkflow, context: WorkflowCompilerContext, retention?: ShadowRetentionControl): Promise<ShadowObservation>;
   observeIfEnabled(request: string, primary: CompiledWorkflow, context: WorkflowCompilerContext): Promise<ShadowObservation | undefined>;
 }
 
@@ -149,7 +155,7 @@ export function createShadowRoutingService(options: ShadowRoutingOptions): Shado
   let enabled = false;
   let latest: ShadowObservation | undefined;
 
-  async function evaluate(request: string, primary: CompiledWorkflow, context: WorkflowCompilerContext): Promise<ShadowObservation> {
+  async function evaluateImpl(request: string, primary: CompiledWorkflow, context: WorkflowCompilerContext, retainRequestText: boolean): Promise<ShadowObservation> {
     const primarySummary = routeSummary(primary);
     const createdAt = context.now;
     let candidate: ShadowCandidateSummary;
@@ -221,7 +227,7 @@ export function createShadowRoutingService(options: ShadowRoutingOptions): Shado
       ...identity,
       // Raw text is retained for eval-case curation only when disclosure
       // permits leaving the local boundary; LOCAL_ONLY stays hash-only.
-      ...(disclosureCurationAllowed ? { requestText: request } : {}),
+      ...(disclosureCurationAllowed && retainRequestText ? { requestText: request } : {}),
       createdAt,
       primary: primarySummary,
       candidate,
@@ -236,9 +242,9 @@ export function createShadowRoutingService(options: ShadowRoutingOptions): Shado
   return {
     setEnabled(value): void { enabled = value; },
     status(): ShadowRoutingStatus { return latest === undefined ? { enabled } : { enabled, latest }; },
-    evaluate,
+    async evaluate(request, primary, context, retention) { return evaluateImpl(request, primary, context, retention?.retainRequestText === true); },
     async observeIfEnabled(request, primary, context): Promise<ShadowObservation | undefined> {
-      return enabled ? evaluate(request, primary, context) : undefined;
+      return enabled ? evaluateImpl(request, primary, context, false) : undefined;
     },
   };
 }

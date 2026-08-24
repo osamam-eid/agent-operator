@@ -145,9 +145,13 @@ export function parseOperatorCommand(rawArgs: string): OperatorParseResult {
       return { kind: 'SHADOW', subcommand: subcommand.toUpperCase() as 'ON' | 'OFF' | 'STATUS' };
     }
     if (subcommand === 'evaluate') {
-      const parsed = parseRequest(tokens, 2, 'shadow evaluate');
+      const retainIndex = tokens.indexOf('--retain-text');
+      const retained = tokens.filter((token) => token === '--retain-text');
+      if (retained.length > 1) return { kind: 'PARSE_ERROR', message: '"--retain-text" may be specified only once.' };
+      const filtered = retained.length === 1 ? tokens.filter((token) => token !== '--retain-text') : tokens;
+      const parsed = parseRequest(filtered, 2, 'shadow evaluate');
       if ('kind' in parsed) return parsed;
-      return { kind: 'SHADOW', subcommand: 'EVALUATE', ...parsed };
+      return { kind: 'SHADOW', subcommand: 'EVALUATE', ...(retained.length === 1 ? { retainText: true } : {}), ...parsed };
     }
     return { kind: 'PARSE_ERROR', message: '"shadow" requires one of: on, off, status, evaluate <request>.' };
   }

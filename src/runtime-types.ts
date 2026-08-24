@@ -40,7 +40,7 @@ export type OperatorCommand =
   | { readonly kind: 'POLICY_TEST'; readonly proposedPath: string; readonly request: string; readonly familyOverride?: Exclude<TaskFamily, 'DIRECT'> }
   | { readonly kind: 'CANARY'; readonly providerId: string; readonly modelId?: string }
   | { readonly kind: 'COMPETENCE'; readonly subcommand: 'STATUS' | 'SHOW'; readonly providerId?: string; readonly modelId?: string }
-  | { readonly kind: 'SHADOW'; readonly subcommand: 'ON' | 'OFF' | 'STATUS' | 'EVALUATE'; readonly request?: string; readonly familyOverride?: Exclude<TaskFamily, 'DIRECT'> }
+  | { readonly kind: 'SHADOW'; readonly subcommand: 'ON' | 'OFF' | 'STATUS' | 'EVALUATE'; readonly request?: string; readonly familyOverride?: Exclude<TaskFamily, 'DIRECT'>; readonly retainText?: true }
   | { readonly kind: 'FLEET'; readonly subcommand: string; readonly args: readonly string[] };
 
 export type OperatorCommandErrorCode =

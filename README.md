@@ -37,7 +37,7 @@ Nothing is vendored or uploaded. The extension runs inside an existing OMP host:
 | `/operator --explain <request>` | Persist a non-dispatching route explanation |
 | `/operator status · graph · why · explain` | Session / graph / structured decision detail |
 | `/operator shadow on · off · status` | Control semantic shadow comparison; never changes active routing |
-| `/operator shadow evaluate <request>` | Run one semantic comparison and store a request-hash-only observation |
+| `/operator shadow evaluate <request>` | Run one semantic comparison; hash-only storage unless `--retain-text` |
 | `/operator competence status` | Show admitted evidence, human signals, and canary counts |
 | `/operator competence show <provider> [model]` | Inspect evidence-derived scorecards; never changes routing |
 | `/operator policy test --proposed <path> <request>` | Compare current/proposed routes and estimates without applying policy |
