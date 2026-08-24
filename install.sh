@@ -9,6 +9,8 @@ mkdir -p "$DEST"
 for entry in extension src agents policies config scripts SKILL.md; do
   cp -R "${SRC}/${entry}" "$DEST/"
 done
+mkdir -p "$DEST/schemas"
+cp "${SRC}/schemas/agent-result.v1.json" "$DEST/schemas/"
 printf '%s\n' '/**' ' * Installation entry shim: OMP loads extensions/<name>/index.ts.' ' */' "export { default } from './extension/index.js';" > "$DEST/index.ts"
 if command -v bun >/dev/null 2>&1; then
   bun "$DEST/scripts/fleet-bootstrap.ts" || true

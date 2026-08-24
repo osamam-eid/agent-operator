@@ -1,0 +1,13 @@
+node_modules
+.DS_Store
+*.tgz
+.env
+
+# Local-only: internal planning, dev tests, contract schemas, release notes, package/lock metadata.
+work-packages/
+tests/
+schemas/*
+!schemas/agent-result.v1.json
+RELEASE_NOTES*.md
+package.json
+tsconfig.json

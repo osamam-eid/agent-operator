@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omp.local/agent-operator/schemas/agent-result.v1.json",
+  "title": "AgentResult.v1",
+  "description": "AgentResult.v1 (plan §4, §11): the normalized, adapter-produced outcome of one executed node. Never carries hidden/private chain-of-thought; only decisions, evidence, artifacts, findings, and a concise summary cross node boundaries.",
+  "type": "object",
+  "properties": {
+    "resultId": {
+      "type": "string",
+      "description": "Result identifier.",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "operatorSessionId": {
+      "type": "string",
+      "description": "Owning OperatorSession.operatorSessionId.",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "nodeId": {
+      "$ref": "#/$defs/NodeIdRef"
+    },
+    "capabilityId": {
+      "type": "string",
+      "description": "Executing CapabilityRecord.id.",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "status": {
+      "$ref": "#/$defs/AgentResultStatus"
+    },
+    "summary": {
+      "type": "string",
+      "description": "Concise human-facing outcome summary. Never a reasoning trace.",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "producedArtifactRefs": {
+      "type": "array",
+      "description": "ArtifactManifest.artifactId refs produced by this node.",
+      "items": {
+        "type": "string",
+        "description": "artifactId reference.",
+        "minLength": 1,
+        "maxLength": 256
+      },
+      "minItems": 0,
+      "uniqueItems": true
+    },
+    "consumedArtifactRefs": {
+      "type": "array",
+      "description": "ArtifactManifest.artifactId refs consumed by this node.",
+      "items": {
+        "type": "string",
+        "description": "artifactId reference.",
+        "minLength": 1,
+        "maxLength": 256
+      },
+      "minItems": 0,
+      "uniqueItems": true
+    },
+    "findingIds": {
+      "type": "array",
+      "description": "Finding.findingId refs raised by this node.",
+      "items": {
+        "$ref": "#/$defs/FindingIdRef"
+      },
+      "minItems": 0,
+      "uniqueItems": true
+    },
+    "evidenceIds": {
+      "type": "array",
+      "description": "Evidence.evidenceId refs produced by this node.",
+      "items": {
+        "type": "string",
+        "description": "evidenceId reference.",
+        "minLength": 1,
+        "maxLength": 256
+      },
+      "minItems": 0,
+      "uniqueItems": true
+    },
+    "recommendedDisposition": {
+      "$ref": "#/$defs/FindingEffectiveDisposition"
+    },
+    "providerSessionId": {
+      "type": "string",
+      "description": "Child provider (Claude/Codex/etc.) session id, when applicable.",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "startedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When node execution started."
+    },
+    "completedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When node execution completed."
+    },
+    "policyRefs": {
+      "type": "array",
+      "description": "Versioned policy citations applied while executing this node.",
+      "items": {
+        "$ref": "#/$defs/PolicyRef"
+      },
+      "minItems": 0,
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "resultId",
+    "operatorSessionId",
+    "nodeId",
+    "capabilityId",
+    "status",
+    "summary",
+    "producedArtifactRefs",
+    "consumedArtifactRefs",
+    "findingIds",
+    "evidenceIds",
+    "startedAt",
+    "completedAt",
+    "policyRefs"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "AgentResultStatus": {
+      "type": "string",
+      "description": "Normalized adapter execution status for one node (plan §12).",
+      "enum": [
+        "SUCCEEDED",
+        "FAILED",
+        "BLOCKED",
+        "CANCELLED",
+        "UNKNOWN"
+      ]
+    },
+    "FindingEffectiveDisposition": {
+      "type": "string",
+      "description": "Deterministic policy-engine-owned disposition (plan §8); also reused as the PolicyDecision.decision vocabulary and AgentResult.recommendedDisposition. A human may override only through a named gate.",
+      "enum": [
+        "BLOCK",
+        "CORRECT",
+        "HUMAN_DECISION",
+        "CONTINUE",
+        "DEFER",
+        "RECORD"
+      ]
+    },
+    "FindingIdRef": {
+      "type": "string",
+      "description": "Finding.findingId reference, e.g. SOL-SEC-04.",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "NodeIdRef": {
+      "type": "string",
+      "description": "Graph/template nodeId reference.",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "PolicyRef": {
+      "type": "string",
+      "description": "Versioned policy citation, e.g. masar@3:review.maxRounds or secure-code@2:independentVerification (plan §5, §6).",
+      "minLength": 3,
+      "maxLength": 256,
+      "pattern": "^[a-z][a-z0-9-]*@[0-9]+:[a-zA-Z0-9_.]+$"
+    }
+  }
+}
