@@ -407,6 +407,7 @@ export class OperatorRuntime {
         return {
           attempt: outcome.attempt,
           result: validation.value,
+
           ...(usage === undefined ? {} : { usage }),
           ...(fallbackJournal === undefined ? {} : { fallbackJournal }),
         };
@@ -430,6 +431,14 @@ export class OperatorRuntime {
       };
       return { attempt: outcome.attempt, result: failed };
     });
+  }
+  /** Resolves per-invocation semantic-primary context flags from the
+   * promoted-candidate verification callback. Never throws: verification
+   * failure means deterministic routing, not a failed command. */
+  async #semanticContextFlags(): Promise<Pick<WorkflowCompilerContext, 'semanticPrimary'>> {
+    if (this.#deps.semanticPrimaryActive === undefined) return {};
+    const enabled = await this.#deps.semanticPrimaryActive().catch(() => false);
+    return enabled ? { semanticPrimary: true } : {};
   }
 
   // -------------------------------------------------------------------------
@@ -467,6 +476,7 @@ export class OperatorRuntime {
       }
     }
     const context: WorkflowCompilerContext = {
+      ...(await this.#semanticContextFlags()),
       projectRoot: this.#deps.projectRoot,
       operatorSessionId,
       graphId,
@@ -524,6 +534,7 @@ export class OperatorRuntime {
     }
     const digest = createHash('sha256').update(`${this.#deps.projectRoot}\n${effectiveRequest}\n${now}`, 'utf8').digest('hex').slice(0, 24);
     const context: WorkflowCompilerContext = {
+      disableSemanticPrimary: true,
       projectRoot: this.#deps.projectRoot,
       operatorSessionId: `simulation:${digest}`,
       graphId: `simulation-graph:${digest}`,
@@ -593,6 +604,7 @@ export class OperatorRuntime {
     }
     const digest = createHash('sha256').update(`shadow\n${this.#deps.projectRoot}\n${effectiveRequest}\n${now}`, 'utf8').digest('hex').slice(0, 24);
     const context: WorkflowCompilerContext = {
+      disableSemanticPrimary: true,
       projectRoot: this.#deps.projectRoot,
       operatorSessionId: `shadow-primary:${digest}`,
       graphId: `shadow-primary-graph:${digest}`,
@@ -655,6 +667,7 @@ export class OperatorRuntime {
     }
     const digest = createHash('sha256').update(`policy\n${proposedPath}\n${effectiveRequest}\n${now}`, 'utf8').digest('hex').slice(0, 24);
     const context: WorkflowCompilerContext = {
+      disableSemanticPrimary: true,
       projectRoot: this.#deps.projectRoot,
       operatorSessionId: `policy:${digest}`,
       graphId: `policy-graph:${digest}`,

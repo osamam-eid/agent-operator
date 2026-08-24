@@ -57,6 +57,7 @@ import {
   type RuntimeDisclosureClassifier,
 } from './intelligence.js';
 import { estimateCompiledWorkflow } from './policy-simulation.js';
+import type { SemanticOperatorClassifier } from './semantic-classifier.js';
 import type {
   CapabilityRegistry,
   CapabilitySelection,
@@ -80,6 +81,9 @@ export interface Stage3WorkflowCompilerOptions {
   readonly classifier?: OperatorClassifier;
   /** Runtime disclosure classifier; deterministic and local by default. */
   readonly disclosureClassifier?: RuntimeDisclosureClassifier;
+  /** Promoted-candidate semantic classifier. Absent, or a context without
+   * `semanticPrimary`, keeps deterministic fixture routing. */
+  readonly semanticClassifier?: SemanticOperatorClassifier;
   /** Forwarded to `config.ts#loadResolvedOperatorConfig`. */
   readonly cwd?: string;
   /** Forwarded to `config.ts#loadResolvedOperatorConfig`. */
@@ -149,12 +153,14 @@ class Stage3WorkflowCompiler implements OperatorWorkflowCompiler {
   private readonly stage7FeatureSet: Stage7FeatureSet | undefined;
   private readonly stage7ExecutorsAvailable: boolean;
   private readonly fleetCapabilitySelect: ((requirement: CapabilityRequirement) => CapabilitySelection) | undefined;
+  private readonly semanticClassifier: SemanticOperatorClassifier | undefined;
 
   constructor(options: Stage3WorkflowCompilerOptions) {
     this.classifier = options.classifier ?? createMockOperatorClassifier();
     this.disclosureClassifier = options.disclosureClassifier ?? createDefaultRuntimeDisclosureClassifier();
     this.policiesDir = options.policiesDir ?? DEFAULT_POLICIES_DIR;
     this.registryFactory = options.registryFactory ?? (() => createProductionCapabilityRegistry());
+    this.semanticClassifier = options.semanticClassifier;
     this.stage7FeatureSet = options.stage7FeatureSet;
     this.stage7ExecutorsAvailable = options.stage7ExecutorsAvailable === true;
     this.fleetCapabilitySelect = options.fleetCapabilitySelect;
@@ -190,13 +196,6 @@ class Stage3WorkflowCompiler implements OperatorWorkflowCompiler {
       return failure(
         'FEATURE_DISABLED',
         'The request was classified as explicit direct/automatic intent. Automatic routing and direct bypass are outside the Stage 3 compiler; every request must go through an explicit human-approved workflow.',
-      );
-    }
-
-    if (classification.confidence === 'LOW') {
-      return failure(
-        'CLASSIFICATION_INVALID',
-        classification.abstentionReason ?? 'Classification abstained at LOW confidence with no reason recorded.',
       );
     }
 
@@ -246,6 +245,50 @@ class Stage3WorkflowCompiler implements OperatorWorkflowCompiler {
         'DISCLOSURE_BLOCKED',
         `Fleet execution is blocked by disclosure class ${disclosureDecision.disclosureClass}.`,
         config.policyRefs,
+      );
+    }
+
+    // -- 2c. Promoted semantic-primary upgrade ------------------------------
+    // Runs only when (a) the runtime verified an active, digest-matched
+    // intelligence candidate, (b) no explicit family override won, (c) the
+    // nested-compile opt-out is absent, and (d) disclosure permits leaving
+    // the local boundary. Any semantic failure fails compilation closed —
+    // there is never a keyword fallback behind a promoted candidate.
+    if (
+      context.semanticPrimary === true &&
+      context.disableSemanticPrimary !== true &&
+      context.familyOverride === undefined &&
+      context.fleetRoute !== true &&
+      disclosureDecision.disclosureClass !== 'LOCAL_ONLY' &&
+      this.semanticClassifier !== undefined
+    ) {
+      try {
+        const semantic = await this.semanticClassifier.classify({
+          request,
+          projectRoot: context.projectRoot,
+          operatorSessionId: context.operatorSessionId,
+          disclosureDecision,
+        });
+        if (semantic.proposal.requestClassification === 'DIRECT') {
+          return failure('FEATURE_DISABLED', 'The semantic classifier returned explicit direct/automatic intent; direct bypass is outside the compiler.', config.policyRefs);
+        }
+        if (semantic.proposal.confidence === 'LOW') {
+          return failure('CLASSIFICATION_INVALID', semantic.proposal.abstentionReason ?? 'Semantic-primary classification abstained at LOW confidence.', config.policyRefs);
+        }
+        classification = semantic.proposal;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return failure('CLASSIFICATION_INVALID', `Semantic-primary classification failed closed: ${message}`, config.policyRefs);
+      }
+    }
+
+    // Deterministic abstention only fails the compile once any promoted
+    // semantic-primary upgrade has had its chance; the fixture classifier is
+    // never allowed to veto an activated candidate by abstaining first.
+    if (classification.confidence === 'LOW') {
+      return failure(
+        'CLASSIFICATION_INVALID',
+        classification.abstentionReason ?? 'Classification abstained at LOW confidence with no reason recorded.',
       );
     }
 
@@ -450,8 +493,14 @@ class Stage3WorkflowCompiler implements OperatorWorkflowCompiler {
       entries: [
         {
           stage: 'CLASSIFICATION',
-          summary: `Selected task family ${classification.requestClassification} with ${classification.confidence} confidence.`,
-          reasonCodes: [context.familyOverride === undefined ? 'CLASSIFIER_PROPOSAL_ACCEPTED' : 'EXPLICIT_FAMILY_ACCEPTED'],
+          summary: context.semanticPrimary === true && context.disableSemanticPrimary !== true
+            ? `Semantic-primary classification selected task family ${classification.requestClassification} with ${classification.confidence} confidence.`
+            : `Selected task family ${classification.requestClassification} with ${classification.confidence} confidence.`,
+          reasonCodes: [context.familyOverride !== undefined
+            ? 'EXPLICIT_FAMILY_ACCEPTED'
+            : context.semanticPrimary === true && context.disableSemanticPrimary !== true
+              ? 'SEMANTIC_PRIMARY_ACCEPTED'
+              : 'CLASSIFIER_PROPOSAL_ACCEPTED'],
         },
         {
           stage: 'PROJECT_TRUST',

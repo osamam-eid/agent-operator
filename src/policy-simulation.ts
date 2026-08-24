@@ -187,8 +187,8 @@ export function createPolicySimulationService(options: PolicySimulationOptions):
         policyRefs: [...new Set([...currentConfig.policyRefs, 'agent-operator@1:policy.simulation'])],
       };
       const [currentResult, proposedResult] = await Promise.all([
-        options.compileWithConfig(request, { ...context, operatorSessionId: `policy-current:${context.operatorSessionId}`, graphId: `policy-current:${context.graphId}`, gateId: `policy-current:${context.gateId}` }, currentConfig),
-        options.compileWithConfig(request, { ...context, operatorSessionId: `policy-proposed:${context.operatorSessionId}`, graphId: `policy-proposed:${context.graphId}`, gateId: `policy-proposed:${context.gateId}` }, proposedConfig),
+        options.compileWithConfig(request, { ...context, disableSemanticPrimary: true, operatorSessionId: `policy-current:${context.operatorSessionId}`, graphId: `policy-current:${context.graphId}`, gateId: `policy-current:${context.gateId}` }, currentConfig),
+        options.compileWithConfig(request, { ...context, disableSemanticPrimary: true, operatorSessionId: `policy-proposed:${context.operatorSessionId}`, graphId: `policy-proposed:${context.graphId}`, gateId: `policy-proposed:${context.gateId}` }, proposedConfig),
       ]);
       const current = snapshot(currentResult);
       const proposed = snapshot(proposedResult);

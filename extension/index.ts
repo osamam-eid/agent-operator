@@ -79,7 +79,7 @@ import { createShadowRoutingService, FileShadowObservationStore } from '../src/s
 import { createProviderIntelligenceService, FileProviderIntelligenceStore } from '../src/provider-intelligence.js';
 import { createPolicySimulationService } from '../src/policy-simulation.js';
 import { createSemanticCanaryCommand } from '../src/intelligence-activation.js';
-import { FileIntelligenceActivationStore, createIntelligenceActivationService } from '../src/intelligence-activation.js';
+import { FileIntelligenceActivationStore, createIntelligenceActivationService, intelligenceCandidateDigest } from '../src/intelligence-activation.js';
 import { createIntelligenceLifecycleHandler } from '../src/intelligence-lifecycle.js';
 import { createRecoveryPackagePort, FileRecoveryPackageStore } from '../src/execution-safety.js';
 import type { ArtifactManifest, Evidence, ExecutionGraphNode } from '../src/contracts.js';
@@ -440,11 +440,10 @@ function buildOperatorRuntime(): { handler: (args: string, ctx: ExtensionCommand
           ...(selection.fallbackFrom !== undefined ? { fallbackFrom: selection.fallbackFrom } : {}),
         };
       };
-  const compilerOptions: Stage3WorkflowCompilerOptions = {
+  const baseCompilerOptions: Stage3WorkflowCompilerOptions = {
     stage7FeatureSet: startupFeatureSet,
     ...(fleetCapabilitySelect === undefined ? {} : { fleetCapabilitySelect }),
   };
-  const compiler = createStage3WorkflowCompiler(compilerOptions);
   const policySimulation = createPolicySimulationService({
     loadCurrentConfig: (root) => loadResolvedOperatorConfig({ projectRoot: root }),
     readProposed: async (proposedPath) => {
@@ -456,7 +455,7 @@ function buildOperatorRuntime(): { handler: (args: string, ctx: ExtensionCommand
       return readFileSync(candidate, 'utf8');
     },
     compileWithConfig: (request, context, config) =>
-      createStage3WorkflowCompiler({ ...compilerOptions, loadConfig: async () => config }).compile(request, context),
+      createStage3WorkflowCompiler({ ...baseCompilerOptions, loadConfig: async () => config }).compile(request, context),
   });
   const contextProjector = createOperatorContextProjector({ projectRoot, projectionsRoot });
 
@@ -470,12 +469,27 @@ function buildOperatorRuntime(): { handler: (args: string, ctx: ExtensionCommand
       return selectedModel;
     },
   });
+  const compiler = createStage3WorkflowCompiler({ ...baseCompilerOptions, semanticClassifier });
+  const semanticPrimaryActive = async (): Promise<boolean> => {
+    try {
+      const pointer = await intelligenceActivation.active();
+      if (pointer === undefined) return false;
+      const manifestPath = join(rootDir, 'evaluator', 'intelligence', 'candidates', `${pointer.activeCandidateId}.json`);
+      const stats = lstatSync(manifestPath);
+      if (!stats.isFile() || stats.isSymbolicLink()) return false;
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Parameters<typeof intelligenceActivation.promote>[0]['candidate'];
+      if (typeof manifest.semanticClassifierDigest !== 'string' || !/^[0-9a-f]{64}$/.test(manifest.semanticClassifierDigest)) return false;
+      return intelligenceCandidateDigest(manifest) === pointer.activeDigest;
+    } catch {
+      return false;
+    }
+  };
   const shadowRouting = createShadowRoutingService({
     classifier: semanticClassifier,
     store: new FileShadowObservationStore(join(rootDir, 'shadow')),
     compileCandidate: (proposal: ClassificationProposal, context) =>
       createStage3WorkflowCompiler({
-        ...compilerOptions,
+        ...baseCompilerOptions,
         classifier: { classify: () => proposal },
       }).compile(context.familyOverride === undefined ? 'semantic shadow request' : `semantic shadow ${context.familyOverride}`, context),
   });
@@ -559,6 +573,7 @@ function buildOperatorRuntime(): { handler: (args: string, ctx: ExtensionCommand
     compiler,
     projectRoot,
     shadowRouting,
+    semanticPrimaryActive,
     registerActiveBatch: coordinator.registerActiveBatch.bind(coordinator),
     providerIntelligence,
     policySimulation,

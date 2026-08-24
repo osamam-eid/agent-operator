@@ -171,6 +171,7 @@ export function createShadowRoutingService(options: ShadowRoutingOptions): Shado
         } else {
           const shadowContext: WorkflowCompilerContext = {
             ...context,
+            disableSemanticPrimary: true,
             operatorSessionId: `shadow:${context.operatorSessionId}`,
             graphId: `shadow:${context.graphId}`,
             gateId: `shadow:${context.gateId}`,

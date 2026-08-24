@@ -219,6 +219,13 @@ export interface WorkflowCompilerContext {
   readonly fleetRoute?: true;
   /** Explicit user-selected task family. This bypasses inference only. */
   readonly familyOverride?: Exclude<TaskFamily, 'DIRECT'>;
+  /** Set by the runtime when a promoted, digest-verified intelligence
+   * candidate enables semantic-primary routing. Disclosure still gates the
+   * model call and any semantic failure fails compilation closed. */
+  readonly semanticPrimary?: true;
+  /** Set by shadow evaluation / policy simulation so nested compilations
+   * never trigger a second semantic model call. */
+  readonly disableSemanticPrimary?: true;
 }
 
 export interface OperatorWorkflowCompiler {

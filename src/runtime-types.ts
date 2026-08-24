@@ -352,6 +352,10 @@ export interface OperatorRuntimeDependencies {
   readonly policySimulation?: PolicySimulationPort;
   /** Optional WP18 fixed-corpus canary runner. */
   readonly providerCanary?: ProviderCanaryCommandPort;
+  /** Resolves whether a promoted, digest-verified intelligence candidate
+   * enables semantic-primary routing for this invocation. Omit or false
+   * keeps deterministic fixture routing. */
+  readonly semanticPrimaryActive?: () => Promise<boolean>;
   /** Passed as `WorkflowCompilerContext.projectRoot` on every `compile()`
    * call: the project directory this runtime instance operates against
    * (config/trust resolution root). */
