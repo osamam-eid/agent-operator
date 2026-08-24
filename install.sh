@@ -6,7 +6,7 @@ SRC="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$(dirname "$DEST")"
 rm -rf "$DEST"
 mkdir -p "$DEST"
-for entry in extension src schemas policies config scripts SKILL.md package.json; do
+for entry in extension src agents policies config scripts SKILL.md; do
   cp -R "${SRC}/${entry}" "$DEST/"
 done
 printf '%s\n' '/**' ' * Installation entry shim: OMP loads extensions/<name>/index.ts.' ' */' "export { default } from './extension/index.js';" > "$DEST/index.ts"
