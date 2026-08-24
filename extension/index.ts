@@ -485,9 +485,11 @@ function buildOperatorRuntime(): { handler: (args: string, ctx: ExtensionCommand
     }
   };
   const shadowStore = new FileShadowObservationStore(join(rootDir, 'shadow'));
+  const predictionLedger = new FilePredictionLedger(join(rootDir, 'predictions'));
   const shadowRouting = createShadowRoutingService({
     classifier: semanticClassifier,
     store: shadowStore,
+    predictions: predictionLedger,
     compileCandidate: (proposal: ClassificationProposal, context) =>
       createStage3WorkflowCompiler({
         ...baseCompilerOptions,
@@ -496,7 +498,6 @@ function buildOperatorRuntime(): { handler: (args: string, ctx: ExtensionCommand
   });
   const intelligenceActivation = createIntelligenceActivationService(new FileIntelligenceActivationStore(join(rootDir, 'intelligence-active')));
   const recoveryPort = createRecoveryPackagePort(new FileRecoveryPackageStore(join(rootDir, 'recovery')));
-  const predictionLedger = new FilePredictionLedger(join(rootDir, 'predictions'));
   const providerCanary = createSemanticCanaryCommand({
     classifier: semanticClassifier,
     intelligence: providerIntelligence,

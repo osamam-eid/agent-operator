@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { makePredictionRecord } from './prediction-ledger.js';
 import type { CompiledWorkflow, CompilationResult, ClassificationProposal, WorkflowCompilerContext } from './stage3-types.js';
 import type { SemanticClassificationResult, SemanticOperatorClassifier } from './semantic-classifier.js';
 import { isPlainObject } from './validation/primitives.js';
@@ -96,6 +97,9 @@ export interface ShadowRoutingOptions {
   readonly classifier: SemanticOperatorClassifier;
   readonly compileCandidate: (proposal: ClassificationProposal, context: WorkflowCompilerContext) => Promise<CompilationResult>;
   readonly store: ShadowObservationStore;
+  /** Optional raw-prediction telemetry: shadow candidates feed calibration
+   * before any promotion. Failures never affect the observation. */
+  readonly predictions?: import('./prediction-ledger.js').PredictionLedger;
 }
 
 function routeSummary(compiled: CompiledWorkflow): ShadowRouteSummary {
@@ -235,6 +239,27 @@ export function createShadowRoutingService(options: ShadowRoutingOptions): Shado
       policyRefs: primary.routeDecision.policyRefs,
     };
     await options.store.save(observation);
+
+    // Raw shadow-candidate prediction telemetry (label-free until curated).
+    if (
+      options.predictions !== undefined &&
+      typeof candidate.rawConfidence === 'number' &&
+      (observation.candidate.status === 'COMPILED' || observation.candidate.status === 'DO_NOT_EXECUTE')
+    ) {
+      try {
+        await options.predictions.append(makePredictionRecord({
+          dimension: 'CLASSIFICATION',
+          predictionIdentity: 'semantic-shadow-v1',
+          rawConfidence: candidate.rawConfidence,
+          chosen: candidate.family ?? candidate.status,
+          operatorSessionId: context.operatorSessionId,
+          observedAt: createdAt,
+        }));
+      } catch {
+        // Telemetry only: an append failure must not fail the evaluation.
+      }
+    }
+
     latest = observation;
     return observation;
   }
