@@ -29,9 +29,14 @@ export interface PredictionLedger {
   label(predictionId: string, correct: boolean, now: string): Promise<boolean>;
 }
 
+const PREDICTION_RECORD_KEYS = ['schemaVersion', 'predictionId', 'dimension', 'predictionIdentity', 'rawConfidence', 'chosen', 'operatorSessionId', 'observedAt', 'labeledCorrect', 'labeledAt'] as const;
+
 export function validatePredictionRecord(value: unknown): value is PredictionRecord {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (!(PREDICTION_RECORD_KEYS as readonly string[]).includes(key)) return false;
+  }
   return record['schemaVersion'] === '1.0'
     && typeof record['predictionId'] === 'string'
     && typeof record['dimension'] === 'string'
