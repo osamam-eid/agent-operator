@@ -1,4 +1,11 @@
-node_modules/
+node_modules
 .DS_Store
 *.tgz
 .env
+
+# Runtime ships src/ + agents/ + config/ + policies/ + schemas are local contracts;
+# keep internal planning, tests, and schema docs out of the public repo.
+work-packages/
+tests/
+schemas/
+RELEASE_NOTES*.md

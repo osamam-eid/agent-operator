@@ -17,6 +17,15 @@ A governed, multi-stage workflow operator for OMP (Oh My Pi). It turns a free-fo
 
 Type `/operator` + space for the full arrow-navigable command menu.
 
+## Requirements and dependencies
+
+Nothing is vendored or uploaded. The extension runs inside an existing OMP host:
+
+- **OMP** with the extensions API (`@oh-my-pi/pi-coding-agent` 17.3.5 peer dependency, resolved by your OMP install; never bundled here).
+- **An active OMP model selection** at dispatch time (the current model is reused for native nodes, semantic shadow routing, and canaries).
+- **Bun 1.x** only if you want to run the local test suite or typecheck (`bun test`, `bun run typecheck`). Tests and JSON contract schemas are intentionally not published in this repository.
+- `install.sh` copies this package into `~/.omp/agent/extensions/agent-operator/`; it requires standard POSIX shell utilities and creates no other dependencies.
+
 ## Command surface
 
 | Command | Purpose |

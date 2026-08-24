@@ -198,7 +198,9 @@ export class OperatorRuntime {
       });
       const completedState = result.ok ? result.record.session.currentState : undefined;
       if (result.ok && this.#deps.providerIntelligence !== undefined && (completedState === 'COMPLETED' || completedState === 'FAILED' || completedState === 'BLOCKED' || completedState === 'CANCELLED')) {
-        await this.#deps.providerIntelligence.recordTerminalSession(result.record).catch(() => undefined);
+        await this.#deps.providerIntelligence.recordTerminalSession(result.record).catch((error) => {
+          process.stderr.write(`[agent-operator] evidence recording failed (session continues): ${error instanceof Error ? error.message : String(error)}\n`);
+        });
       }
       if (result.ok) this.#activeBatches.delete(operatorSessionId);
       if (!result.ok) return result.outcome;
@@ -482,7 +484,9 @@ export class OperatorRuntime {
       };
     }
     if (this.#deps.shadowRouting !== undefined) {
-      await this.#deps.shadowRouting.observeIfEnabled(effectiveRequest, compilation.compiled, context).catch(() => undefined);
+      await this.#deps.shadowRouting.observeIfEnabled(effectiveRequest, compilation.compiled, context).catch((error) => {
+        process.stderr.write(`[agent-operator] shadow evaluation failed closed: ${error instanceof Error ? error.message : String(error)}\n`);
+      });
     }
 
 
@@ -778,7 +782,9 @@ export class OperatorRuntime {
     const decidedGate = result.record.gates.find((g) => g.gateId === gateId);
     const humanDecision = result.record.session.humanDecisions.at(-1);
     if (humanDecision !== undefined && this.#deps.providerIntelligence !== undefined) {
-      await this.#deps.providerIntelligence.recordHumanDecision(result.record, humanDecision).catch(() => undefined);
+      await this.#deps.providerIntelligence.recordHumanDecision(result.record, humanDecision).catch((error) => {
+        process.stderr.write(`[agent-operator] override signal recording failed (decision stands): ${error instanceof Error ? error.message : String(error)}\n`);
+      });
     }
     const text = this.#describeDecisionOutcome(gateId, decision, result.record);
     return {
