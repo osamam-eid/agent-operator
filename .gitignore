@@ -11,3 +11,4 @@ schemas/*
 RELEASE_NOTES*.md
 package.json
 tsconfig.json
+.test-predictions*
