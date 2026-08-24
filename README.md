@@ -86,6 +86,7 @@ An offline, promotion-recommendation-only subsystem:
 - **evaluate** — deterministic structural scoring of baseline, and — via an injected trusted executor — of a verified candidate bundle; both sides emit provenance-complete score envelopes (run/corpus/digests/spec/scorer-version/budget bound)
 - **compare** — consumes **only** evaluator-produced trusted envelopes; hard-gate failures override numeric improvement; externally authored scores are rejected by design
 - **candidate verify / compare --candidate-bundle** — write-once bundle verification with prohibited-component rejection
+- **intelligence** — WP18 lifecycle: context-plan / evidence-brief / retention / calibrate reports, candidate manifests, human-gated `promote`/`rollback` of the active semantic bundle, prediction `list`/`label`/`export`, and `shadow-cases` conversion of divergent observations into LOCAL_ONLY drafts
 
 **Promotion is always human-only** (`promotedBySystem` is structurally `false`).
 

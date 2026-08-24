@@ -291,7 +291,7 @@ const OPERATOR_SUBCOMMANDS: ReadonlyArray<{ label: string; description: string; 
   { label: 'competence', description: 'Inspect evidence-derived provider scorecards', hint: 'status | show <provider> [model]' },
   { label: 'policy', description: 'Compare a proposed policy without applying it', hint: 'test --proposed <path> <request>' },
   { label: 'canary', description: 'Run bounded fixed provider qualification cases', hint: 'run <provider> [model]' },
-  { label: 'improve', description: 'Evaluator: harvest, corpus, evaluate, compare, generate', hint: '<subcommand>' },
+  { label: 'improve', description: 'Evaluator: harvest, corpus, evaluate, compare, generate, intelligence', hint: '<subcommand>' },
   { label: 'fleet', description: 'Manage provider fleet catalog (bootstrap / list / remove)' },
 ];
 
@@ -621,6 +621,10 @@ function buildOperatorRuntime(): { handler: (args: string, ctx: ExtensionCommand
     '  canary run <provider> [model]  run bounded read-only qualification cases',
     '  resume <operator-session-id>   reload a persisted session',
     '  improve status | harvest | corpus | evaluate | candidate verify | compare | generate',
+    '    … intelligence status | context-plan | evidence-brief | retention | calibrate',
+    '    … intelligence candidate | promote <id> <run> --approval <ref> | rollback --approval <ref>',
+    '    … intelligence predictions list | label <id> <correct|incorrect> | export --out <path>',
+    '    … intelligence shadow-cases [--drafts-dir <dir>] [--limit <n>]',
     '',
     'Example: /operator plan the migration approach',
   ].join('\n');
