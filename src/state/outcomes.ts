@@ -11,6 +11,7 @@
 
 import type { AgentResult, AgentResultStatus, NodeState } from '../contracts.js';
 import type { NodeExecutionOutcome, NodeResultRefs, StoredOperatorSession } from '../runtime-types.js';
+import type { FailureFingerprint, ProviderFallbackJournal } from '../execution-safety.js';
 
 export function mapAgentResultStatusToNodeState(status: AgentResultStatus): NodeState {
   switch (status) {
@@ -27,7 +28,14 @@ export function mapAgentResultStatusToNodeState(status: AgentResultStatus): Node
   }
 }
 
-export function toNodeResultRefs(result: AgentResult, attempt: NodeExecutionOutcome['attempt'], completedAt: string, usage: NodeExecutionOutcome['usage'] = undefined): NodeResultRefs {
+export function toNodeResultRefs(
+  result: AgentResult,
+  attempt: NodeExecutionOutcome['attempt'],
+  completedAt: string,
+  usage: NodeExecutionOutcome['usage'] = undefined,
+  failureFingerprint?: FailureFingerprint,
+  fallbackJournal?: ProviderFallbackJournal,
+): NodeResultRefs {
   return {
     status: result.status,
     summary: result.summary,
@@ -42,6 +50,8 @@ export function toNodeResultRefs(result: AgentResult, attempt: NodeExecutionOutc
     modelId: attempt.modelId,
     startedAt: attempt.startedAt,
     completedAt,
+    ...(failureFingerprint === undefined ? {} : { failureFingerprint }),
+    ...(fallbackJournal === undefined ? {} : { fallbackJournal }),
     ...(usage !== undefined ? { usage } : {}),
   };
 }

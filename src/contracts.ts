@@ -397,6 +397,22 @@ export interface OperatorSession {
 // 7. HumanGate.v1 (plan section 9)
 // ---------------------------------------------------------------------------
 
+export interface GateRiskSummary {
+  readonly riskLevel: RiskLevel;
+  readonly disclosureClass: 'LOCAL_ONLY' | 'INTERNAL_REDACTABLE' | 'EXTERNAL_ALLOWED';
+  readonly mutationClasses: readonly MutationClass[];
+  readonly providers: readonly string[];
+  readonly tools: readonly string[];
+  readonly scopedNodes: readonly string[];
+  readonly actionsNotPerformed: readonly string[];
+  readonly recoveryRequired: boolean;
+  readonly expectedProviderCalls: number;
+  readonly maximumDepth: number;
+  readonly estimatedCost: number | null;
+  readonly costConfidence: 'UNAVAILABLE' | 'LOW' | 'MEDIUM' | 'HIGH';
+  readonly previewReasons: readonly string[];
+}
+
 export interface HumanGate {
   readonly gateId: string;
   readonly operatorSessionId: string;
@@ -416,6 +432,8 @@ export interface HumanGate {
   /** Index-aligned with `artifactRefs`. */
   readonly artifactHashes: readonly string[];
   readonly policyRefs: readonly PolicyRef[];
+  /** Structured, graph-bound information only; never changes gate authority. */
+  readonly riskSummary?: GateRiskSummary;
   readonly createdAt: string;
   readonly expiresAt?: string;
   readonly status: GateStatus;

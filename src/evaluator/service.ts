@@ -22,10 +22,12 @@ export interface EvaluatorServiceDeps {
    * the result through the same deterministic scorer as the baseline.
    * Caller-authored score values are never accepted instead. */
   readonly executeCandidateCase?: (request: { readonly evalRunId: string; readonly attemptId: string; readonly evalCase: EvalCase }) => Promise<EvalCase>;
+  /** Optional WP18 intelligence lifecycle handler for `improve intelligence …`. */
+  readonly intelligenceHandler?: (args: readonly string[]) => Promise<OperatorCommandOutcome>;
   readonly now?: () => string;
 }
 
-const SUBCOMMANDS: readonly string[] = ['status', 'harvest', 'corpus', 'evaluate', 'candidate', 'compare', 'generate'];
+const SUBCOMMANDS: readonly string[] = ['status', 'harvest', 'corpus', 'evaluate', 'candidate', 'compare', 'generate', 'intelligence'];
 
 function ok(text: string): OperatorCommandOutcome { return { ok: true, text }; }
 function fail(text: string, code: OperatorCommandOutcome extends never ? never : 'EVALUATOR_ERROR' | 'INVALID_COMMAND' | 'FEATURE_DISABLED'): OperatorCommandOutcome { return { ok: false, text, errorCode: code }; }
@@ -294,6 +296,7 @@ export function createEvaluatorHandler(deps: EvaluatorServiceDeps): (subcommand:
       case 'candidate': return candidate('verify', args[0] === 'verify' ? args.slice(1) : args);
       case 'compare': return compare(args);
       case 'generate': return generate(args);
+      case 'intelligence': return deps.intelligenceHandler === undefined ? fail('The intelligence lifecycle subsystem is unavailable.', 'FEATURE_DISABLED') : deps.intelligenceHandler(args);
       default: return fail(`Unknown evaluator subcommand "${subcommand}". Known: ${SUBCOMMANDS.join(', ')}.`, 'INVALID_COMMAND');
     }
   };

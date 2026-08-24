@@ -1,19 +1,24 @@
 /**
  * Agent Operator — public API surface.
  *
- * Re-exports every domain contract type from `./contracts`, every
- * validator/validation type from `./validators`, the Stage 2 runtime
- * seam types from `./runtime-types`, the command parser from
- * `./commands`, the controller (`OperatorRuntime` /
- * `createOperatorRuntime`) from `./controller`, the deterministic mock
- * node executor from `./mock`, and the session store implementations
- * (`MemoryOperatorSessionStore`, `FileOperatorSessionStore`,
- * `StoreConflictError`, `appendJournal`) from `./store`. No behavior
- * beyond re-export lives in this module.
+ * Re-exports every domain contract type from `./contracts`, validators from
+ * `./validators`, WP12 intelligence contracts from `./intelligence`, runtime
+ * seam types from `./runtime-types`, the command parser, and the controller
+ * (`OperatorRuntime` / `createOperatorRuntime`). It also exports the
+ * deterministic mock and session-store APIs. No behavior lives here.
  */
 
 export * from './contracts.js';
 export * from './validators.js';
+export * from './intelligence.js';
+export * from './semantic-classifier.js';
+export * from './shadow-routing.js';
+export * from './execution-safety.js';
+export * from './provider-intelligence.js';
+export * from './policy-simulation.js';
+export * from './context-intelligence.js';
+export * from './intelligence-activation.js';
+export * from './intelligence-lifecycle.js';
 export * from './runtime-types.js';
 export * from './commands.js';
 export * from './controller.js';

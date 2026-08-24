@@ -106,6 +106,21 @@ const SHAPE_BY_FAMILY: Readonly<Record<ScoredFamily, RequestedShape>> = {
  * only kept so `requestClassification` is never left semantically empty. */
 const AMBIGUOUS_FALLBACK_FAMILY: ScoredFamily = 'RESEARCH';
 
+/** Deterministic proposal used only when the user explicitly selects a task
+ * family. It bypasses family inference, not policy, risk, capability, or
+ * approval enforcement. */
+export function createExplicitFamilyClassification(family: ScoredFamily): ClassificationProposal {
+  return {
+    requestClassification: family,
+    riskClassification: RISK_BY_FAMILY[family],
+    confidence: 'HIGH',
+    decomposable: true,
+    semanticCapabilities: CAPABILITIES_BY_FAMILY[family],
+    requestedExecutionShape: SHAPE_BY_FAMILY[family],
+    rationale: `Task family explicitly selected by the user: ${family}.`,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Matching
 // ---------------------------------------------------------------------------

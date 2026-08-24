@@ -41,7 +41,7 @@ import type {
 } from './contracts.js';
 import { validateRouteDecision } from './validation/core-contracts.js';
 import { validateHumanGate } from './validation/session.js';
-import { createMockOperatorClassifier } from './classifier.js';
+import { createExplicitFamilyClassification, createMockOperatorClassifier } from './classifier.js';
 import { loadResolvedOperatorConfig, OperatorConfigError, type LoadOperatorConfigOptions } from './config.js';
 import { DEFAULT_POLICIES_DIR, loadPolicyPacks, PolicyEngineError, resolvePolicy } from './policy.js';
 import { createProductionCapabilityRegistry, CapabilitySelectionError, PRODUCTION_MAX_CONCURRENT_NODES } from './registry.js';
@@ -49,6 +49,14 @@ import { getWorkflowTemplateById, resolveTemplateNodes, selectWorkflowTemplateFo
 import { STAGE7_BINDINGS, selectStage7Capability } from './stage7/bindings.js';
 import type { Stage7FeatureSet } from './stage7/types.js';
 import { compileExecutionGraph } from './graph.js';
+import {
+  createDefaultRuntimeDisclosureClassifier,
+  validateDecisionTrace,
+  validateRuntimeDisclosureDecision,
+  type DecisionTrace,
+  type RuntimeDisclosureClassifier,
+} from './intelligence.js';
+import { estimateCompiledWorkflow } from './policy-simulation.js';
 import type {
   CapabilityRegistry,
   CapabilitySelection,
@@ -70,6 +78,8 @@ import type {
 export interface Stage3WorkflowCompilerOptions {
   /** Deterministic mock classifier by default; injectable for tests. */
   readonly classifier?: OperatorClassifier;
+  /** Runtime disclosure classifier; deterministic and local by default. */
+  readonly disclosureClassifier?: RuntimeDisclosureClassifier;
   /** Forwarded to `config.ts#loadResolvedOperatorConfig`. */
   readonly cwd?: string;
   /** Forwarded to `config.ts#loadResolvedOperatorConfig`. */
@@ -132,6 +142,7 @@ function failure(code: CompilationFailureCode, message: string, policyRefs: read
 
 class Stage3WorkflowCompiler implements OperatorWorkflowCompiler {
   private readonly classifier: OperatorClassifier;
+  private readonly disclosureClassifier: RuntimeDisclosureClassifier;
   private readonly policiesDir: string;
   private readonly loadConfig: (input: { readonly projectRoot: string }) => Promise<ResolvedOperatorConfig>;
   private readonly registryFactory: () => CapabilityRegistry;
@@ -141,6 +152,7 @@ class Stage3WorkflowCompiler implements OperatorWorkflowCompiler {
 
   constructor(options: Stage3WorkflowCompilerOptions) {
     this.classifier = options.classifier ?? createMockOperatorClassifier();
+    this.disclosureClassifier = options.disclosureClassifier ?? createDefaultRuntimeDisclosureClassifier();
     this.policiesDir = options.policiesDir ?? DEFAULT_POLICIES_DIR;
     this.registryFactory = options.registryFactory ?? (() => createProductionCapabilityRegistry());
     this.stage7FeatureSet = options.stage7FeatureSet;
@@ -166,7 +178,9 @@ class Stage3WorkflowCompiler implements OperatorWorkflowCompiler {
     // -- 1. Classify -------------------------------------------------------
     let classification: ClassificationProposal;
     try {
-      classification = await this.classifier.classify(request);
+      classification = context.familyOverride === undefined
+        ? await this.classifier.classify(request)
+        : createExplicitFamilyClassification(context.familyOverride);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return failure('CLASSIFICATION_INVALID', `Classifier threw: ${message}`);
@@ -213,6 +227,26 @@ class Stage3WorkflowCompiler implements OperatorWorkflowCompiler {
           config.projectOverlay.reason ??
           `Project overlay at ${config.projectOverlay.policyPath ?? '(unresolved path)'} was ignored and never merged into the effective profile.`,
       });
+    }
+
+    // -- 2b. Resolve disclosure before any external-provider eligibility ----
+    const disclosureDecision = this.disclosureClassifier.classify({
+      request,
+      predictionIdentity: context.familyOverride === undefined ? 'DETERMINISTIC_FIXTURE' : 'EXPLICIT_FAMILY',
+      explicitFleetRoute: context.fleetRoute === true,
+      projectTrustStatus: config.projectOverlay.status,
+    });
+    const disclosureValidation = validateRuntimeDisclosureDecision(disclosureDecision);
+    if (!disclosureValidation.ok) {
+      const joined = disclosureValidation.errors.map((error) => `${error.path}: ${error.message}`).join('; ');
+      return failure('DISCLOSURE_BLOCKED', `Disclosure decision failed validation: ${joined}`, config.policyRefs);
+    }
+    if (context.fleetRoute === true && disclosureDecision.disclosureClass !== 'EXTERNAL_ALLOWED') {
+      return failure(
+        'DISCLOSURE_BLOCKED',
+        `Fleet execution is blocked by disclosure class ${disclosureDecision.disclosureClass}.`,
+        config.policyRefs,
+      );
     }
 
 
@@ -370,6 +404,18 @@ class Stage3WorkflowCompiler implements OperatorWorkflowCompiler {
         reasonCode: selection.reasonCode,
       }));
 
+    const capabilitySummaries = nodes.map((node) => {
+      const selection = selections[node.nodeId]!;
+      return {
+        nodeId: node.nodeId,
+        role: selection.requirement.role,
+        capabilityId: selection.selected.id,
+        provider: selection.provider,
+        tools: selection.selected.tools,
+        mutationClass: selection.requirement.mutationClass,
+      };
+    });
+
     const requiredGateValues: readonly GateDecisionType[] = [...resolvedPolicy.requiredGates, ...template.template.requiredGateTypes];
     const requiredGates = GATE_PRIORITY_ORDER.filter((gate) => requiredGateValues.includes(gate));
 
@@ -398,11 +444,71 @@ class Stage3WorkflowCompiler implements OperatorWorkflowCompiler {
       abstention: { abstained: false },
     };
 
+    const policyReasonCodes = Array.from(new Set(resolvedPolicy.decisions.flatMap((decision) => decision.reasonCodes)));
+    const decisionTrace: DecisionTrace = {
+      schemaVersion: '1.0',
+      entries: [
+        {
+          stage: 'CLASSIFICATION',
+          summary: `Selected task family ${classification.requestClassification} with ${classification.confidence} confidence.`,
+          reasonCodes: [context.familyOverride === undefined ? 'CLASSIFIER_PROPOSAL_ACCEPTED' : 'EXPLICIT_FAMILY_ACCEPTED'],
+        },
+        {
+          stage: 'PROJECT_TRUST',
+          summary: `Project overlay status is ${config.projectOverlay.status}.`,
+          reasonCodes: [`PROJECT_OVERLAY_${config.projectOverlay.status}`],
+          policyRefs: config.policyRefs,
+        },
+        {
+          stage: 'DISCLOSURE',
+          summary: `Effective disclosure class is ${disclosureDecision.disclosureClass}.`,
+          reasonCodes: disclosureDecision.reasonCodes,
+        },
+        {
+          stage: 'POLICY',
+          summary: `Resolved ${resolvedPolicy.decisions.length} deterministic policy decision(s).`,
+          reasonCodes: policyReasonCodes.length > 0 ? policyReasonCodes : ['POLICY_DEFAULTS_APPLIED'],
+          policyRefs: resolvedPolicy.policyRefs,
+        },
+        {
+          stage: 'WORKFLOW_SELECTION',
+          summary: `Selected workflow ${template.template.templateId}.`,
+          reasonCodes: [`SELECTED_TEMPLATE_${template.template.templateId.replace(/[^A-Za-z0-9]+/g, '_').toUpperCase()}`],
+        },
+        {
+          stage: 'CAPABILITY_SELECTION',
+          summary: `Selected ${capabilitySummaries.length} capability assignment(s).`,
+          reasonCodes: Array.from(new Set(nodes.map((node) => selections[node.nodeId]!.reasonCode))),
+        },
+        {
+          stage: 'GRAPH_COMPILATION',
+          summary: `Compiled graph revision ${executionGraph.graphRevision} with ${executionGraph.nodes.length} node(s).`,
+          reasonCodes: ['GRAPH_COMPILED'],
+        },
+      ],
+    };
+    const traceValidation = validateDecisionTrace(decisionTrace);
+    if (!traceValidation.ok) {
+      const joined = traceValidation.errors.map((error) => `${error.path}: ${error.message}`).join('; ');
+      return failure('GRAPH_INVALID', `Decision trace failed validation: ${joined}`, resolvedPolicy.policyRefs);
+    }
+
     const routeValidation = validateRouteDecision(routeDecision);
     if (!routeValidation.ok) {
       const joined = routeValidation.errors.map((e) => `${e.path}: ${e.message}`).join('; ');
       return failure('GRAPH_INVALID', `Compiled RouteDecision failed contract validation: ${joined}`, resolvedPolicy.policyRefs);
     }
+    const executionEstimate = estimateCompiledWorkflow({
+      classification,
+      disclosureDecision,
+      decisionTrace,
+      capabilitySummaries,
+      policy: resolvedPolicy,
+      template: template.template,
+      routeDecision,
+      executionGraph,
+      initialGate: null,
+    });
 
     // -- 8. Build the initial, exact graph-bound HumanGate -------------------
     let initialGate: HumanGate | null = null;
@@ -413,7 +519,7 @@ class Stage3WorkflowCompiler implements OperatorWorkflowCompiler {
         operatorSessionId: context.operatorSessionId,
         reason: `The "${template.template.templateId}" workflow (task family ${classification.requestClassification}, risk ${classification.riskClassification}) requires explicit human approval before its first node executes.`,
         decisionType: 'EXECUTION_APPROVAL',
-        requestedDecision: `Approve execution of the "${template.template.templateId}" workflow for this request?`,
+        requestedDecision: `${executionEstimate.previewRequired ? `Review expensive/high-risk preview [${executionEstimate.previewReasons.join(', ')}], then ` : ''}approve execution of the "${template.template.templateId}" workflow for this request?`,
         availableOptions: ['APPROVE', 'REJECT'],
         recommendedOption: 'APPROVE',
         evidenceRefs: [],
@@ -427,6 +533,21 @@ class Stage3WorkflowCompiler implements OperatorWorkflowCompiler {
         artifactRefs: [],
         artifactHashes: [],
         policyRefs,
+        riskSummary: {
+          riskLevel: classification.riskClassification,
+          disclosureClass: disclosureDecision.disclosureClass,
+          mutationClasses: Array.from(new Set(capabilitySummaries.map((summary) => summary.mutationClass))),
+          providers: Array.from(new Set(capabilitySummaries.map((summary) => summary.provider))).sort(),
+          tools: Array.from(new Set(capabilitySummaries.flatMap((summary) => summary.tools))).sort(),
+          scopedNodes: executionGraph.nodes.map((node) => node.nodeId),
+          actionsNotPerformed: ['No commit, push, merge, deployment, publication, or destructive action is authorized by this execution gate.'],
+          recoveryRequired: capabilitySummaries.some((summary) => summary.mutationClass !== 'READ_ONLY'),
+          expectedProviderCalls: executionEstimate.expectedProviderCalls,
+          maximumDepth: executionEstimate.maximumDepth,
+          estimatedCost: executionEstimate.estimatedCost,
+          costConfidence: executionEstimate.costConfidence,
+          previewReasons: executionEstimate.previewReasons,
+        },
         createdAt: context.now,
         status: 'OPEN',
       };
@@ -442,6 +563,9 @@ class Stage3WorkflowCompiler implements OperatorWorkflowCompiler {
       ok: true,
       compiled: {
         classification,
+        disclosureDecision,
+        decisionTrace,
+        capabilitySummaries,
         policy: resolvedPolicy,
         template: template.template,
         routeDecision,

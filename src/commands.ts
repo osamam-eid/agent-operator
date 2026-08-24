@@ -10,6 +10,7 @@
  * No I/O, no clock, no ids: pure string -> command mapping only.
  */
 
+import type { TaskFamily } from './contracts.js';
 import type { OperatorCommand } from './runtime-types.js';
 
 /** Returned by `parseOperatorCommand` when `rawArgs` does not match the V1
@@ -47,13 +48,54 @@ const RESERVED_EVALUATOR_COMMANDS: Record<string, true> = { improve: true };
  * `SESSION_NOT_FOUND`. */
 const ID_TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
+type FamilyOverride = Exclude<TaskFamily, 'DIRECT'>;
+const FAMILY_OVERRIDES: Readonly<Record<FamilyOverride, true>> = {
+  RESEARCH: true,
+  PLAN: true,
+  IMPLEMENT: true,
+  REVIEW: true,
+  UI: true,
+  QA: true,
+  SECURITY: true,
+  OPERATIONS: true,
+};
+
+function parseRequest(tokens: readonly string[], offset: number, usage: string): { readonly request: string; readonly familyOverride?: FamilyOverride } | OperatorParseError {
+  let cursor = offset;
+  let familyOverride: FamilyOverride | undefined;
+  let fleetRoute = false;
+  while (cursor < tokens.length) {
+    if (tokens[cursor] === '--fleet') {
+      if (fleetRoute) return { kind: 'PARSE_ERROR', message: '"--fleet" may be specified only once.' };
+      fleetRoute = true;
+      cursor += 1;
+      continue;
+    }
+    if (tokens[cursor] === '--family') {
+      if (familyOverride !== undefined) return { kind: 'PARSE_ERROR', message: '"--family" may be specified only once.' };
+      const rawFamily = tokens[cursor + 1];
+      if (rawFamily === undefined || FAMILY_OVERRIDES[rawFamily as FamilyOverride] !== true) {
+        return { kind: 'PARSE_ERROR', message: `"--family" requires one of: ${Object.keys(FAMILY_OVERRIDES).join(', ')}.` };
+      }
+      familyOverride = rawFamily as FamilyOverride;
+      cursor += 2;
+      continue;
+    }
+    break;
+  }
+  const task = tokens.slice(cursor).join(' ').trim();
+  if (task.length === 0) return { kind: 'PARSE_ERROR', message: `${usage} requires a non-empty request.` };
+  const request = fleetRoute ? `--fleet ${task}` : task;
+  return familyOverride === undefined ? { request } : { request, familyOverride };
+}
+
 export function parseOperatorCommand(rawArgs: string): OperatorParseResult {
   const trimmed = rawArgs.trim();
   if (trimmed.length === 0) {
     return {
       kind: 'PARSE_ERROR',
       message:
-        'missing command or request. Provide a request to start a session, or one of: --explain <request>, --dry-run <request>, explain, why, status, graph, approve <gate>, reject <gate>, continue, cancel, resume <id>.',
+        'missing command or request. Provide a request, simulate <request>, --dry-run <request>, --explain <request>, or an inspection/session command.',
     };
   }
 
@@ -65,9 +107,15 @@ export function parseOperatorCommand(rawArgs: string): OperatorParseResult {
       message: [
         'Agent Operator — available commands:',
         '  <request>                      start a governed workflow session',
-        '  --dry-run <request>            preflight without dispatching',
+        '  simulate <request>             compile and preflight without state or dispatch',
+        '  --dry-run <request>            alias for simulate',
         '  --explain <request>            routing explanation only',
+        '  --family <FAMILY> <request>    start with an explicit task family',
         '  status | graph | why | explain show session / graph / routing detail',
+        '  shadow on|off|status|evaluate  semantic comparison without route influence',
+        '  competence status|show          inspect evidence-derived scorecards',
+        '  policy test --proposed <path>  compare policy without applying it',
+        '  canary run <provider> [model]  run bounded read-only qualification cases',
         '  continue | cancel              drive the active session',
         '  approve <gate-id> | reject <gate-id>',
         '  resume <operator-session-id>   reload a persisted session',
@@ -79,19 +127,65 @@ export function parseOperatorCommand(rawArgs: string): OperatorParseResult {
   }
 
   if (first === '--explain') {
-    const request = tokens.slice(1).join(' ').trim();
-    if (request.length === 0) {
-      return { kind: 'PARSE_ERROR', message: '"--explain" requires a request: --explain <request>.' };
-    }
-    return { kind: 'START', request, mode: 'EXPLAIN' };
+    const parsed = parseRequest(tokens, 1, '--explain');
+    if ('kind' in parsed) return parsed;
+    return { kind: 'START', mode: 'EXPLAIN', ...parsed };
   }
 
-  if (first === '--dry-run') {
-    const request = tokens.slice(1).join(' ').trim();
-    if (request.length === 0) {
-      return { kind: 'PARSE_ERROR', message: '"--dry-run" requires a request: --dry-run <request>.' };
+  if (first === '--dry-run' || first === 'simulate') {
+    const parsed = parseRequest(tokens, 1, first);
+    if ('kind' in parsed) return parsed;
+    return { kind: 'SIMULATE', ...parsed };
+  }
+
+  if (first === 'shadow') {
+    const subcommand = tokens[1];
+    if (subcommand === 'on' || subcommand === 'off' || subcommand === 'status') {
+      if (tokens.length !== 2) return { kind: 'PARSE_ERROR', message: `"shadow ${subcommand}" takes no additional arguments.` };
+      return { kind: 'SHADOW', subcommand: subcommand.toUpperCase() as 'ON' | 'OFF' | 'STATUS' };
     }
-    return { kind: 'START', request, mode: 'DRY_RUN' };
+    if (subcommand === 'evaluate') {
+      const parsed = parseRequest(tokens, 2, 'shadow evaluate');
+      if ('kind' in parsed) return parsed;
+      return { kind: 'SHADOW', subcommand: 'EVALUATE', ...parsed };
+    }
+    return { kind: 'PARSE_ERROR', message: '"shadow" requires one of: on, off, status, evaluate <request>.' };
+  }
+
+  if (first === 'competence') {
+    const subcommand = tokens[1];
+    if (subcommand === 'status' && tokens.length === 2) return { kind: 'COMPETENCE', subcommand: 'STATUS' };
+    if (subcommand === 'show' && tokens.length >= 3 && tokens.length <= 4) {
+      const providerId = tokens[2];
+      if (providerId === undefined) return { kind: 'PARSE_ERROR', message: 'competence show requires a provider id.' };
+      return {
+        kind: 'COMPETENCE',
+        subcommand: 'SHOW',
+        providerId,
+        ...(tokens[3] === undefined ? {} : { modelId: tokens[3] }),
+      };
+    }
+    return { kind: 'PARSE_ERROR', message: '"competence" requires status or show <provider> [model].' };
+  }
+
+  if (first === 'policy') {
+    if (tokens[1] !== 'test' || tokens[2] !== '--proposed' || tokens[3] === undefined) {
+      return { kind: 'PARSE_ERROR', message: '"policy test" requires --proposed <path> <request>.' };
+    }
+    const parsed = parseRequest(tokens, 4, 'policy test');
+    if ('kind' in parsed) return parsed;
+    return { kind: 'POLICY_TEST', proposedPath: tokens[3], ...parsed };
+  }
+
+  if (first === 'canary') {
+    if (tokens[1] !== 'run' || tokens[2] === undefined || tokens.length > 4) return { kind: 'PARSE_ERROR', message: '"canary run" requires <provider> [model].' };
+    return { kind: 'CANARY', providerId: tokens[2], ...(tokens[3] === undefined ? {} : { modelId: tokens[3] }) };
+  }
+
+  if (first === '--family' || first === '--fleet') {
+    const parsed = parseRequest(tokens, 0, first);
+    if ('kind' in parsed) return parsed;
+    return { kind: 'START', mode: 'EXECUTE', ...parsed };
   }
 
   if (RESERVED_BARE_COMMANDS[first] === true) {

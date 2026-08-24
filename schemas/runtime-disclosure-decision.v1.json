@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omp.local/agent-operator/schemas/runtime-disclosure-decision.v1.json",
+  "title": "RuntimeDisclosureDecision.v1",
+  "description": "WP12: the compiler's disclosure eligibility decision for one request, computed after config/trust resolution and before fleet/provider capability selection. Only a sensitive-signal boolean and reason codes are retained; matched request content is never stored on this record.",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "description": "Contract schema version.",
+      "const": "1.0"
+    },
+    "disclosureClass": {
+      "type": "string",
+      "description": "LOCAL_ONLY never leaves the local compiler; INTERNAL_REDACTABLE may reach configured native capabilities; only EXTERNAL_ALLOWED may reach external-CLI/fleet capabilities.",
+      "enum": ["LOCAL_ONLY", "INTERNAL_REDACTABLE", "EXTERNAL_ALLOWED"]
+    },
+    "predictionIdentity": {
+      "type": "string",
+      "description": "Identity of whatever produced the request's task-family classification this decision rides alongside.",
+      "enum": ["DETERMINISTIC_FIXTURE", "EXPLICIT_FAMILY"]
+    },
+    "sensitiveSignalDetected": {
+      "type": "boolean",
+      "description": "True iff any line of the request matched the credential-bearing pattern."
+    },
+    "explicitFleetRoute": {
+      "type": "boolean",
+      "description": "Mirrors WorkflowCompilerContext.fleetRoute === true; never inferred from classification."
+    },
+    "projectTrustStatus": {
+      "type": "string",
+      "description": "Resolved project-overlay trust used by disclosure classification.",
+      "enum": ["ABSENT", "TRUSTED", "UNTRUSTED"]
+    },
+    "reasonCodes": {
+      "type": "array",
+      "description": "Non-empty, stable, uppercase reason codes explaining the disclosureClass decision.",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z][A-Z0-9_]*$",
+        "maxLength": 200
+      },
+      "minItems": 1
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "disclosureClass",
+    "predictionIdentity",
+    "sensitiveSignalDetected",
+    "explicitFleetRoute",
+    "projectTrustStatus",
+    "reasonCodes"
+  ],
+  "additionalProperties": false
+}

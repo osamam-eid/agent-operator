@@ -41,9 +41,9 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 
 import {
   AgentRegistry,
@@ -67,13 +67,21 @@ import {
 import { FileOperatorSessionStore } from '../src/store.js';
 
 import { createOmpSdkSessionFactory, createOmpTaskAdapter, type OmpCustomToolDefinition, type OmpHostSdk, type OmpToolFactories } from '../src/adapters/omp-task.js';
-import { createStage3WorkflowCompiler } from '../src/compiler.js';
-import type { CapabilityRequirement, CapabilitySelection } from '../src/stage3-types.js';
-import { resolveProviderCatalogPath } from '../src/config.js';
+import { createStage3WorkflowCompiler, type Stage3WorkflowCompilerOptions } from '../src/compiler.js';
+import type { CapabilityRequirement, CapabilitySelection, ClassificationProposal } from '../src/stage3-types.js';
+import { loadResolvedOperatorConfig, resolveProviderCatalogPath } from '../src/config.js';
 import { loadCatalogFile as loadFleetCatalog } from '../src/fleet-catalog.js';
 import { createExternalCliAdapter } from '../src/adapters/external-cli.js';
 import { createEvaluatorHandler } from '../src/evaluator/service.js';
 import { normalizeProviderCatalog, normalizedProviderToCapabilityRecord, selectProviderRecord, type ProviderCatalog, type ProviderPreferencePolicy } from '../src/provider-fleet.js';
+import { createSemanticOperatorClassifier } from '../src/semantic-classifier.js';
+import { createShadowRoutingService, FileShadowObservationStore } from '../src/shadow-routing.js';
+import { createProviderIntelligenceService, FileProviderIntelligenceStore } from '../src/provider-intelligence.js';
+import { createPolicySimulationService } from '../src/policy-simulation.js';
+import { createSemanticCanaryCommand } from '../src/intelligence-activation.js';
+import { FileIntelligenceActivationStore, createIntelligenceActivationService } from '../src/intelligence-activation.js';
+import { createIntelligenceLifecycleHandler } from '../src/intelligence-lifecycle.js';
+import { createRecoveryPackagePort, FileRecoveryPackageStore } from '../src/execution-safety.js';
 import type { ArtifactManifest, Evidence, ExecutionGraphNode } from '../src/contracts.js';
 import { createOperatorRuntime, type OperatorRuntime } from '../src/controller.js';
 import { collectSharedProjectSources, materializeProjection } from '../src/context-projection.js';
@@ -274,8 +282,14 @@ const OPERATOR_SUBCOMMANDS: ReadonlyArray<{ label: string; description: string; 
   { label: 'approve', description: 'Approve one pending human gate', hint: '<gate-id>' },
   { label: 'reject', description: 'Reject one pending human gate', hint: '<gate-id>' },
   { label: 'resume', description: 'Reload a persisted session after restart', hint: '<operator-session-id>' },
-  { label: '--dry-run', description: 'Preflight a request without dispatching', hint: '<request>' },
+  { label: 'simulate', description: 'Compile and preflight without state or dispatch', hint: '<request>' },
+  { label: '--dry-run', description: 'Alias for side-effect-free simulation', hint: '<request>' },
+  { label: 'shadow', description: 'Semantic shadow routing: on / off / status / evaluate', hint: '<subcommand>' },
+  { label: '--family', description: 'Select the task family explicitly', hint: '<FAMILY> <request>' },
   { label: '--explain', description: 'Explain routing without executing', hint: '<request>' },
+  { label: 'competence', description: 'Inspect evidence-derived provider scorecards', hint: 'status | show <provider> [model]' },
+  { label: 'policy', description: 'Compare a proposed policy without applying it', hint: 'test --proposed <path> <request>' },
+  { label: 'canary', description: 'Run bounded fixed provider qualification cases', hint: 'run <provider> [model]' },
   { label: 'improve', description: 'Evaluator: harvest, corpus, evaluate, compare, generate', hint: '<subcommand>' },
   { label: 'fleet', description: 'Manage provider fleet catalog (bootstrap / list / remove)' },
 ];
@@ -392,15 +406,12 @@ function buildOperatorRuntime(): { handler: (args: string, ctx: ExtensionCommand
     const catalogPath = resolveProviderCatalogPath();
     fleetCatalog = normalizeProviderCatalog(JSON.parse(readFileSync(catalogPath, 'utf8')) as unknown, new Date().toISOString());
   }
+  const providerIntelligence = createProviderIntelligenceService(new FileProviderIntelligenceStore(join(rootDir, 'intelligence')));
   const store = new FileOperatorSessionStore({ rootDir });
-  const compiler = createStage3WorkflowCompiler({
-    stage7FeatureSet: startupFeatureSet,
-    ...(fleetCatalog === undefined ? {} : {
-      fleetCapabilitySelect: (requirement: CapabilityRequirement): CapabilitySelection => {
+  const fleetCapabilitySelect = fleetCatalog === undefined
+    ? undefined
+    : (requirement: CapabilityRequirement): CapabilitySelection => {
         const catalogNow = fleetCatalog as NonNullable<typeof fleetCatalog>;
-        // Deterministic curated order: alphabetical over eligible external-cli
-        // records for this capability. The explicit preference satisfies the
-        // fleet ambiguity guard without ever consulting request text.
         const eligible = catalogNow.records
           .filter((candidate) => candidate.kind === 'external-cli' && candidate.health === 'HEALTHY' && candidate.auth === 'AUTHENTICATED' && candidate.mutability === 'READ_ONLY' && candidate.capabilities.includes(requirement.capability))
           .sort((first, second) => first.providerId.localeCompare(second.providerId));
@@ -413,13 +424,12 @@ function buildOperatorRuntime(): { handler: (args: string, ctx: ExtensionCommand
           allowUndisclosedModels: false,
           fallbackPolicy: 'COMPATIBLE_ONLY',
         };
-        const safeToolNames: readonly string[] = [...OPERATOR_SAFE_TOOL_NAMES];
         const { selection, record, model } = selectProviderRecord(catalogNow, {
           role: requirement.role,
           capability: requirement.capability,
           executionShape: 'SINGLE',
           mutationClass: requirement.mutationClass,
-          toolCeiling: safeToolNames,
+          toolCeiling: [...OPERATOR_SAFE_TOOL_NAMES],
           preference,
         });
         return {
@@ -429,14 +439,58 @@ function buildOperatorRuntime(): { handler: (args: string, ctx: ExtensionCommand
           reasonCode: selection.reasonCode,
           ...(selection.fallbackFrom !== undefined ? { fallbackFrom: selection.fallbackFrom } : {}),
         };
-      },
-    }),
+      };
+  const compilerOptions: Stage3WorkflowCompilerOptions = {
+    stage7FeatureSet: startupFeatureSet,
+    ...(fleetCapabilitySelect === undefined ? {} : { fleetCapabilitySelect }),
+  };
+  const compiler = createStage3WorkflowCompiler(compilerOptions);
+  const policySimulation = createPolicySimulationService({
+    loadCurrentConfig: (root) => loadResolvedOperatorConfig({ projectRoot: root }),
+    readProposed: async (proposedPath) => {
+      const candidate = resolve(projectRoot, proposedPath);
+      const rel = relative(projectRoot, candidate);
+      if (rel === '..' || rel.startsWith('../') || rel.startsWith('..\\')) throw new Error('Proposed policy path must stay inside the project root.');
+      const stats = lstatSync(candidate);
+      if (!stats.isFile() || stats.isSymbolicLink()) throw new Error('Proposed policy must be a regular non-symlink file.');
+      return readFileSync(candidate, 'utf8');
+    },
+    compileWithConfig: (request, context, config) =>
+      createStage3WorkflowCompiler({ ...compilerOptions, loadConfig: async () => config }).compile(request, context),
   });
   const contextProjector = createOperatorContextProjector({ projectRoot, projectionsRoot });
 
   const hostSdk = createProductionHostSdk({ providerSessionRoot });
   const sessionFactory = createOmpSdkSessionFactory(hostSdk, providerSessionRoot);
   let selectedModel: { provider: string; id: string; sdkModel: unknown } | undefined;
+  const semanticClassifier = createSemanticOperatorClassifier({
+    sessionFactory,
+    resolveModel: () => {
+      if (selectedModel === undefined) throw new Error('No active OMP model is available for semantic classification.');
+      return selectedModel;
+    },
+  });
+  const shadowRouting = createShadowRoutingService({
+    classifier: semanticClassifier,
+    store: new FileShadowObservationStore(join(rootDir, 'shadow')),
+    compileCandidate: (proposal: ClassificationProposal, context) =>
+      createStage3WorkflowCompiler({
+        ...compilerOptions,
+        classifier: { classify: () => proposal },
+      }).compile(context.familyOverride === undefined ? 'semantic shadow request' : `semantic shadow ${context.familyOverride}`, context),
+  });
+  const intelligenceActivation = createIntelligenceActivationService(new FileIntelligenceActivationStore(join(rootDir, 'intelligence-active')));
+  const recoveryPort = createRecoveryPackagePort(new FileRecoveryPackageStore(join(rootDir, 'recovery')));
+  const providerCanary = createSemanticCanaryCommand({
+    classifier: semanticClassifier,
+    intelligence: providerIntelligence,
+    resolveModel: () => {
+      if (selectedModel === undefined) throw new Error('No active OMP model is available for provider canaries.');
+      return selectedModel;
+    },
+    projectRoot,
+    now: () => new Date().toISOString(),
+  });
 
   const nodeExecutionAdapter = createOmpTaskAdapter({
     sessionFactory,
@@ -504,7 +558,11 @@ function buildOperatorRuntime(): { handler: (args: string, ctx: ExtensionCommand
     nodeTimeoutMs: () => 900_000,
     compiler,
     projectRoot,
+    shadowRouting,
     registerActiveBatch: coordinator.registerActiveBatch.bind(coordinator),
+    providerIntelligence,
+    policySimulation,
+    providerCanary,
     ...(startupFeatureSet.stage10EvaluatorEnabled === true
       ? {
           evaluatorHandler: createEvaluatorHandler({
@@ -512,6 +570,16 @@ function buildOperatorRuntime(): { handler: (args: string, ctx: ExtensionCommand
             evaluatorDir: join(rootDir, 'evaluator'),
             featureSet: startupFeatureSet,
             baselineDigest: 'fc62ffa61b5f1b69400eb7b24008546846821d8e809f26657018d794680920db',
+            intelligenceHandler: createIntelligenceLifecycleHandler({
+              evaluatorDir: join(rootDir, 'evaluator'),
+              projectRoot,
+              activation: intelligenceActivation,
+              intelligence: providerIntelligence,
+              baseDigest: 'fc62ffa61b5f1b69400eb7b24008546846821d8e809f26657018d794680920db',
+              policyDigest: 'wp18-default-policy',
+              compilerVersion: 'intelligence-roadmap',
+              scorerVersion: 'deterministic-structural-v1',
+            }),
           }),
         }
       : {}),
@@ -520,11 +588,17 @@ function buildOperatorRuntime(): { handler: (args: string, ctx: ExtensionCommand
   const HELP_MENU = [
     'Agent Operator — available commands:',
     '  <request>                      start a governed workflow session',
-    '  --dry-run <request>            preflight without dispatching',
+    '  simulate <request>             compile and preflight without state or dispatch',
+    '  --dry-run <request>            alias for simulate',
+    '  --family <FAMILY> <request>    start with an explicit task family',
     '  --explain <request>            routing explanation only',
     '  status | graph | why | explain show session / graph / routing detail',
+    '  shadow on|off|status|evaluate  compare semantic routing without influence',
     '  continue | cancel              drive the active session',
     '  approve <gate-id> | reject <gate-id>',
+    '  competence status|show         inspect evidence-derived provider scorecards',
+    '  policy test --proposed <path>  compare policy without applying it',
+    '  canary run <provider> [model]  run bounded read-only qualification cases',
     '  resume <operator-session-id>   reload a persisted session',
     '  improve status | harvest | corpus | evaluate | candidate verify | compare | generate',
     '',

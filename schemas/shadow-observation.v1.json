@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omp.local/agent-operator/schemas/shadow-observation.v1.json",
+  "title": "ShadowObservation.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "observationId", "requestHash", "createdAt", "primary", "candidate", "divergences", "policyRefs"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "observationId": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "requestHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "primary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["family", "workflow", "providers"],
+      "properties": {
+        "family": { "type": "string", "minLength": 1 },
+        "workflow": { "type": "string", "minLength": 1 },
+        "providers": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": { "enum": ["COMPILED", "DO_NOT_EXECUTE", "NEEDS_CLARIFICATION", "BLOCKED_DISCLOSURE", "FAILED"] },
+        "family": { "type": "string", "minLength": 1 },
+        "workflow": { "type": "string", "minLength": 1 },
+        "providers": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "disposition": { "enum": ["EXECUTE", "DO_NOT_EXECUTE", "NEEDS_CLARIFICATION"] },
+        "rawConfidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "modelProvider": { "type": "string", "minLength": 1 },
+        "modelId": { "type": "string", "minLength": 1 },
+        "failureCode": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "divergences": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "policyRefs": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+  }
+}

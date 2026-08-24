@@ -31,6 +31,9 @@ export interface MutationScope {
   readonly allowedPaths: readonly string[];
   readonly baselineIdentity: string;
   readonly mutationClass: Exclude<MutationClass, 'READ_ONLY'>;
+  /** Optional exact hash of the approved operation text. When present, any
+   * semantic operation change blocks before mutation. */
+  readonly authorizedOperationHash?: string;
 }
 
 export interface MutationGate {

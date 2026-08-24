@@ -421,7 +421,7 @@ export function validateProjectOperatorOverlay(raw: unknown): ConfigValidationOu
 /** Fields present in `overlay.features`/`overlay.rules` that attempt to
  * flip a hard-locked field away from its safe (`false`) bundled-defaults
  * value. Non-empty result means "reject this overlay layer entirely". */
-function findUnsafeBroadening(overlay: { readonly features?: Partial<OperatorFeatureFlags>; readonly rules?: Partial<OperatorRules> }): readonly string[] {
+export function findUnsafeBroadening(overlay: { readonly features?: Partial<OperatorFeatureFlags>; readonly rules?: Partial<OperatorRules> }): readonly string[] {
   const violations: string[] = [];
   if (overlay.features) {
     for (const key of LOCKED_FALSE_FEATURES) {
@@ -440,7 +440,7 @@ function findUnsafeBroadening(overlay: { readonly features?: Partial<OperatorFea
  * overlay fields keep the base value; `features`/`rules` merge per-flag;
  * `capabilityAssignments` merges per-role so an overlay can override a
  * single role without restating every other assignment. */
-function mergeOverlay(base: OperatorProfile, overlay: ProjectOperatorOverlay): OperatorProfile {
+export function applyProjectOperatorOverlay(base: OperatorProfile, overlay: ProjectOperatorOverlay): OperatorProfile {
   return {
     schemaVersion: '1.0',
     workflow: overlay.workflow ?? base.workflow,
@@ -873,14 +873,14 @@ export async function loadResolvedOperatorConfig(options: LoadOperatorConfigOpti
   let profile = defaultsProfile;
   const policyRefs: PolicyRef[] = [POLICY_REF_DEFAULTS];
   if (globalOverlay) {
-    profile = mergeOverlay(profile, globalOverlay);
+    profile = applyProjectOperatorOverlay(profile, globalOverlay);
     policyRefs.push(POLICY_REF_GLOBAL);
   }
 
   const startDir = options.projectRoot ?? options.cwd ?? process.cwd();
   const projectOverlay = await resolveProjectOverlay(startDir, options.projectRoot === undefined);
   if (projectOverlay.status === 'TRUSTED' && projectOverlay.overlay) {
-    profile = mergeOverlay(profile, projectOverlay.overlay);
+    profile = applyProjectOperatorOverlay(profile, projectOverlay.overlay);
     policyRefs.push(POLICY_REF_PROJECT_TRUSTED);
   }
 

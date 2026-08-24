@@ -8,7 +8,7 @@
  * gates chained back-to-back).
  */
 
-import type { ArtifactManifest, ExecutionGraph, GateDecisionType, HumanGate } from '../contracts.js';
+import type { ArtifactManifest, ExecutionGraph, GateDecisionType, GateRiskSummary, HumanGate } from '../contracts.js';
 import { RUNTIME_POLICY_REF } from './policy-ref.js';
 
 interface GateCopy {
@@ -68,6 +68,7 @@ export function buildPostExecutionGate(
   artifacts: readonly ArtifactManifest[],
   gateId: string,
   now: string,
+  riskSummary?: GateRiskSummary,
 ): HumanGate {
   const { reason, requestedDecision, consequences } = describePostExecutionGate(decisionType, graph.workflowTemplateId);
   return {
@@ -86,6 +87,7 @@ export function buildPostExecutionGate(
     artifactRefs: artifacts.map((artifact) => artifact.artifactId),
     artifactHashes: artifacts.map((artifact) => artifact.hash),
     policyRefs: [`${RUNTIME_POLICY_REF}:gate.${decisionType.toLowerCase()}`],
+    ...(riskSummary === undefined ? {} : { riskSummary }),
     createdAt: now,
     status: 'OPEN',
   };

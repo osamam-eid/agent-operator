@@ -1,6 +1,6 @@
 ---
 name: agent-operator
-description: Use when the user explicitly invokes `/operator` to classify a request, resolve global and trusted project policy, compile and inspect a validated read-only workflow graph, decide its exact human gates, dispatch its read-only planning/review/synthesis nodes, resume an interrupted session, preview compilation with `--dry-run`, or read its typed final result. Do not use for ordinary requests not routed through `/operator`; automatic interception remains unavailable and disabled. Do not use for mutating work (implementation, QA execution, UI implementation) - Stage 4 defines no production capability for any `MUTATING` role; those workflows compile-time block until a later stage.
+description: Use when the user explicitly invokes `/operator` to classify a request, resolve global and trusted project policy, compile and inspect a validated workflow graph, decide its exact human gates, dispatch approved planning/review/synthesis nodes, resume an interrupted session, run side-effect-free simulation with `simulate` or `--dry-run`, select intent explicitly with `--family`, inspect structured decision evidence with `why`, or read its typed final result. Do not use for ordinary requests not routed through `/operator`; automatic interception remains unavailable and disabled. Invocation, simulation, or an explicit family override never authorizes mutation: mutating work remains limited to explicitly enabled capabilities, compiled mutation scopes, and exact human gates.
 ---
 
 # Agent Operator
@@ -62,24 +62,43 @@ anything else is rejected as `INVALID_COMMAND` rather than guessed at:
   mandatory capability is `MUTATING` fails compilation instead), selects
   `plan.v1`, `implement.v1`, `qa.v1`, `security.v1`, `ui-change.v1`, or
   `research.v1`, and validates the compiled graph before any session is
-  persisted. START has three modes:
+  persisted. START has two modes:
   - **EXECUTE** — compiles the workflow and stops at its first exact
     graph-bound human gate. No node executes until that gate is approved and
     `CONTINUE` is issued.
-  - **EXPLAIN** — performs the same classification, policy, capability, and
-    graph checks for inspection only. Explain mode opens no actionable gate
-    and can never dispatch a node.
-  - **DRY_RUN** (`--dry-run "<request>"`) — performs the same compile-time
-    checks as EXECUTE (classification, trusted policy/config resolution,
-    capability selection, graph validation) and stops there: no gate is
-    opened, no provider session is created, and no request is ever sent to
-    a model. Truthful preflight only, never a partial dispatch.
+  - **EXPLAIN** — performs the same classification, disclosure, policy,
+    capability, and graph checks for persisted inspection only. Explain mode
+    opens no actionable gate and can never dispatch a node.
+- **SIMULATE** (`simulate "<request>"`; `--dry-run` is an alias) — uses the
+  real compiler and optional preflight but creates no session, journal, gate,
+  provider session, tool call, mutation, or shared runtime id.
+- **EXPLICIT FAMILY** (`--family <FAMILY> "<request>"`) — selects request
+  intent without bypassing disclosure, risk, policy, capability, or gates.
 - **EXPLAIN** — reports the current session's compiled pipeline, current
   node/gate states, and pending decision, without mutating anything.
-- **WHY** — reports request/risk classification, workflow and graph revision,
-  role/provider capability fit, rejected alternatives, required gates, budget
-  effect, provider health/fallback decisions, exact policy references, and
-  confidence/abstention without mutating anything.
+- **WHY** — renders the stored compiler decision trace: classification,
+  disclosure, project trust, policy, workflow, capability/provider fit,
+  graph, rejected alternatives, required gates, budget, fallback decisions,
+  exact policy references, and confidence/abstention. Legacy sessions are
+  identified when WP12 trace evidence is unavailable.
+- **SHADOW** — `shadow on|off|status|evaluate <request>` compares the current
+  deterministic route with a strict, tool-free semantic candidate. WP13
+  never lets the candidate alter the route, graph, gate, provider, or session.
+  `LOCAL_ONLY` requests never reach the semantic model. Observations retain a
+  request hash and structured decision evidence, never the raw request.
+- **DO_NOT_EXECUTE** (shadow evidence only) — a semantic disposition, not a
+  parsed `/operator` command. Requests with this label are recorded in
+  shadow observations; they never bypass execution by text.
+- **COMPETENCE** — `competence status|show <provider> [model]` inspects
+  admitted, provenance-bound empirical evidence. Scorecards remain separate
+  from the provider catalog and have no routing authority in WP15.
+- **POLICY TEST** — `policy test --proposed <path> <request>` validates a
+  project-contained proposed overlay and compares both real compiler paths.
+  It never writes, trusts, or activates the proposal. Unknown financial cost
+  remains explicit rather than being treated as zero.
+- **CANARY** — `canary run <provider> [model]` runs a fixed, tool-free,
+  read-only semantic corpus under hard case/token/cost/time budgets. Results
+  become evidence only; one failure cannot remove or demote a provider.
 - **STATUS** — reports the current session state, node states, and any
   open gate, without mutating anything.
 - **GRAPH** — reports the compiled execution graph (nodes, edges, mutation
@@ -96,7 +115,9 @@ anything else is rejected as `INVALID_COMMAND` rather than guessed at:
 - **CANCEL** — cancels the active session.
 - **RESUME `<operatorSessionId>`** — reloads a previously persisted
   session by id and reconciles it. See "Resume and `UNKNOWN` nodes" below.
-  session by id and reconciles it. See "Resume and `UNKNOWN` nodes" below.
+- **FLEET** — `fleet bootstrap|list|add|show` manages the operator-owned
+  provider catalog. Catalog entries are capability declarations, never
+  competence proof, and fleet dispatch remains disclosure-gated.
 
 ## Human gate binding
 
@@ -110,6 +131,7 @@ If the session's graph has since changed, the decision fails closed with
 `GATE_MISMATCH` instead of being applied to a graph revision the human
 never actually saw. Approving one gate never grants blanket approval for
 a later graph revision, a different gate, or a different session.
+
 ## Resume and `UNKNOWN` nodes
 
 `RESUME` never assumes a previously `RUNNING` mock node finished, failed,
@@ -130,8 +152,6 @@ path-escaping policy fails closed. Conflicting versioned policy packs fail
 instead of selecting one implicitly. Budget profiles constrain eligible
 capabilities but never override explicit intent, trusted governance, or hard
 safety.
-
-never guesses at an outcome on the affected node's behalf.
 
 ## Evidence-oriented output
 

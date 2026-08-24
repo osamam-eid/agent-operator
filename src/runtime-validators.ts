@@ -18,10 +18,21 @@ import type {
   NodeResultRefs,
   OperatorCommandErrorCode,
   OperatorCommandOutcome,
+  SimulationResultEnvelope,
   StoredOperatorSession,
 } from './runtime-types.js';
 import { validateHumanGate, validateOperatorSession } from './validation/session.js';
+import { validateExecutionGraph, validateRouteDecision } from './validation/core-contracts.js';
+import { validateDecisionTrace, validateRuntimeDisclosureDecision, type DecisionTrace, type RuntimeDisclosureDecision } from './intelligence.js';
 import { requireHash, type ValidationError, type ValidationResult } from './validation/primitives.js';
+import { validateShadowObservation, type ShadowObservation } from './shadow-routing.js';
+import {
+  validateFailureFingerprint,
+  validateProviderFallbackJournal,
+  type FailureFingerprint,
+  type ProviderFallbackJournal,
+} from './execution-safety.js';
+import { validateExecutionEstimate, validatePolicyDiffReport, type PolicyDiffReport } from './policy-simulation.js';
 // ---------------------------------------------------------------------------
 // Internal validation engine (mirrors the Stage 1 engine in validators.ts;
 // that module's helpers are not exported, so this module owns its own
@@ -261,7 +272,7 @@ function validateNodeExecutionAttemptAllocation(ctx: Ctx, path: Path, value: unk
 
 const NODE_RESULT_REFS_KEYS = [
   'status', 'summary', 'producedArtifactRefs', 'consumedArtifactRefs', 'evidenceIds', 'findingIds', 'policyRefs',
-  'recommendedDisposition', 'providerSessionId', 'modelProvider', 'modelId', 'startedAt', 'completedAt', 'usage',
+  'recommendedDisposition', 'providerSessionId', 'modelProvider', 'modelId', 'startedAt', 'completedAt', 'failureFingerprint', 'fallbackJournal', 'usage',
 ] as const;
 const AGENT_RESULT_STATUSES: readonly AgentResultStatus[] = ['SUCCEEDED', 'FAILED', 'BLOCKED', 'CANCELLED', 'UNKNOWN'];
 const FINDING_EFFECTIVE_DISPOSITIONS: readonly FindingEffectiveDisposition[] = ['BLOCK', 'CORRECT', 'HUMAN_DECISION', 'CONTINUE', 'DEFER', 'RECORD'];
@@ -284,6 +295,16 @@ function validateNodeResultRefs(ctx: Ctx, path: Path, value: unknown): NodeResul
   const modelId = requireNonEmptyString(ctx, [...path, 'modelId'], raw.modelId, 256);
   const startedAt = requireTimestamp(ctx, [...path, 'startedAt'], raw.startedAt);
   const completedAt = requireTimestamp(ctx, [...path, 'completedAt'], raw.completedAt);
+  let failureFingerprint: FailureFingerprint | undefined;
+  if (hasOwn(raw, 'failureFingerprint')) {
+    if (validateFailureFingerprint(raw.failureFingerprint)) failureFingerprint = raw.failureFingerprint;
+    else pushErr(ctx, [...path, 'failureFingerprint'], 'must be a valid FailureFingerprint');
+  }
+  let fallbackJournal: ProviderFallbackJournal | undefined;
+  if (hasOwn(raw, 'fallbackJournal')) {
+    if (validateProviderFallbackJournal(raw.fallbackJournal)) fallbackJournal = raw.fallbackJournal;
+    else pushErr(ctx, [...path, 'fallbackJournal'], 'must be a valid ProviderFallbackJournal');
+  }
   let usage: NodeExecutionUsage | undefined;
   if (hasOwn(raw, 'usage')) {
     const usageRaw = checkObjectShape(ctx, [...path, 'usage'], raw.usage, ['tokens', 'cost']);
@@ -295,10 +316,14 @@ function validateNodeResultRefs(ctx: Ctx, path: Path, value: unknown): NodeResul
   }
   if (status === undefined || summary === undefined || producedArtifactRefs === undefined || consumedArtifactRefs === undefined || evidenceIds === undefined || findingIds === undefined || policyRefs === undefined || providerSessionId === undefined || modelProvider === undefined || modelId === undefined || startedAt === undefined || completedAt === undefined) return undefined;
   if (hasOwn(raw, 'recommendedDisposition') && recommendedDisposition === undefined) return undefined;
+  if (hasOwn(raw, 'failureFingerprint') && failureFingerprint === undefined) return undefined;
+  if (hasOwn(raw, 'fallbackJournal') && fallbackJournal === undefined) return undefined;
   return {
     status, summary, producedArtifactRefs, consumedArtifactRefs, evidenceIds, findingIds, policyRefs,
     ...(recommendedDisposition !== undefined ? { recommendedDisposition } : {}),
     providerSessionId, modelProvider, modelId, startedAt, completedAt,
+    ...(failureFingerprint !== undefined ? { failureFingerprint } : {}),
+    ...(fallbackJournal !== undefined ? { fallbackJournal } : {}),
     ...(usage !== undefined ? { usage } : {}),
   };
 }
@@ -307,7 +332,7 @@ function validateNodeResultRefs(ctx: Ctx, path: Path, value: unknown): NodeResul
 // StoredOperatorSession
 // ---------------------------------------------------------------------------
 
-const STORED_OPERATOR_SESSION_KEYS = ['schemaVersion', 'startupFeatureSetHash', 'session', 'gates', 'maxConcurrency', 'activeAttempts', 'nodeResultRefs'] as const;
+const STORED_OPERATOR_SESSION_KEYS = ['schemaVersion', 'startupFeatureSetHash', 'disclosureDecision', 'decisionTrace', 'session', 'gates', 'maxConcurrency', 'activeAttempts', 'nodeResultRefs'] as const;
 
 /** Validates the store envelope: one `OperatorSession` plus its
  * separately-stored `HumanGate` records (plan §9), `maxConcurrency`, and
@@ -339,6 +364,18 @@ export function validateStoredOperatorSession(input: unknown): ValidationResult<
   }
   let startupFeatureSetHash: string | undefined;
   if (hasOwn(raw, 'startupFeatureSetHash')) startupFeatureSetHash = requireHash(ctx, ['startupFeatureSetHash'], raw.startupFeatureSetHash);
+  let disclosureDecision: RuntimeDisclosureDecision | undefined;
+  if (hasOwn(raw, 'disclosureDecision')) {
+    const result = validateRuntimeDisclosureDecision(raw.disclosureDecision);
+    if (result.ok) disclosureDecision = result.value;
+    else for (const error of result.errors) pushErr(ctx, ['disclosureDecision', error.path], error.message);
+  }
+  let decisionTrace: DecisionTrace | undefined;
+  if (hasOwn(raw, 'decisionTrace')) {
+    const result = validateDecisionTrace(raw.decisionTrace);
+    if (result.ok) decisionTrace = result.value;
+    else for (const error of result.errors) pushErr(ctx, ['decisionTrace', error.path], error.message);
+  }
 
   let gates: HumanGate[] | undefined;
   const rawGates = requireArray(ctx, ['gates'], raw.gates);
@@ -445,6 +482,8 @@ export function validateStoredOperatorSession(input: unknown): ValidationResult<
 
   out.schemaVersion = schemaVersion;
   if (startupFeatureSetHash !== undefined) out.startupFeatureSetHash = startupFeatureSetHash;
+  if (disclosureDecision !== undefined) out.disclosureDecision = disclosureDecision;
+  if (decisionTrace !== undefined) out.decisionTrace = decisionTrace;
   out.session = session;
   out.gates = gates;
   out.maxConcurrency = maxConcurrency;
@@ -455,10 +494,65 @@ export function validateStoredOperatorSession(input: unknown): ValidationResult<
 }
 
 // ---------------------------------------------------------------------------
+const SIMULATION_RESULT_KEYS = ['schemaVersion', 'request', 'generatedAt', 'classification', 'disclosureDecision', 'routeDecision', 'executionGraph', 'executionEstimate', 'capabilities', 'decisionTrace', 'preflight'] as const;
+const CAPABILITY_SUMMARY_KEYS = ['nodeId', 'role', 'capabilityId', 'provider', 'tools', 'mutationClass'] as const;
+const CLASSIFICATION_PROPOSAL_KEYS = ['requestClassification', 'riskClassification', 'confidence', 'abstentionReason', 'decomposable', 'semanticCapabilities', 'requestedExecutionShape', 'requestedBudgetProfile', 'rationale'] as const;
+
+function validateSimulationResult(input: unknown): ValidationResult<SimulationResultEnvelope> {
+  const ctx = newCtx();
+  const raw = checkObjectShape(ctx, [], input, SIMULATION_RESULT_KEYS);
+  const out: Record<string, unknown> = {};
+  if (!raw) return finalize(ctx, out);
+  if (raw.schemaVersion !== '1.0') pushErr(ctx, ['schemaVersion'], 'must be exactly "1.0"');
+  const request = requireNonEmptyString(ctx, ['request'], raw.request, MAX_OUTCOME_TEXT);
+  const generatedAt = requireTimestamp(ctx, ['generatedAt'], raw.generatedAt);
+  const preflight = requireEnum(ctx, ['preflight'], raw.preflight, ['PASSED', 'NOT_CONFIGURED'] as const);
+  const classification = checkObjectShape(ctx, ['classification'], raw.classification, CLASSIFICATION_PROPOSAL_KEYS);
+  if (classification !== undefined) {
+    requireEnum(ctx, ['classification', 'requestClassification'], classification.requestClassification, ['DIRECT', 'RESEARCH', 'PLAN', 'IMPLEMENT', 'REVIEW', 'UI', 'QA', 'SECURITY', 'OPERATIONS'] as const);
+    requireEnum(ctx, ['classification', 'riskClassification'], classification.riskClassification, ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const);
+    requireEnum(ctx, ['classification', 'confidence'], classification.confidence, ['HIGH', 'MEDIUM', 'LOW'] as const);
+    requireBoolean(ctx, ['classification', 'decomposable'], classification.decomposable);
+    const semanticCapabilities = requireArray(ctx, ['classification', 'semanticCapabilities'], classification.semanticCapabilities);
+    if (semanticCapabilities !== undefined) semanticCapabilities.forEach((value, index) => requireNonEmptyString(ctx, ['classification', 'semanticCapabilities', index], value, 256));
+    requireNonEmptyString(ctx, ['classification', 'rationale'], classification.rationale, 4000);
+    if (hasOwn(classification, 'abstentionReason')) requireNonEmptyString(ctx, ['classification', 'abstentionReason'], classification.abstentionReason, 4000);
+    if (hasOwn(classification, 'requestedExecutionShape')) requireEnum(ctx, ['classification', 'requestedExecutionShape'], classification.requestedExecutionShape, ['DIRECT', 'SINGLE', 'PARALLEL', 'PIPELINE', 'COUNCIL'] as const);
+    if (hasOwn(classification, 'requestedBudgetProfile')) requireEnum(ctx, ['classification', 'requestedBudgetProfile'], classification.requestedBudgetProfile, ['CHEAP', 'BALANCED', 'QUALITY', 'CRITICAL'] as const);
+  }
+  const disclosure = validateRuntimeDisclosureDecision(raw.disclosureDecision);
+  if (!disclosure.ok) for (const error of disclosure.errors) pushErr(ctx, ['disclosureDecision', error.path], error.message);
+  const trace = validateDecisionTrace(raw.decisionTrace);
+  if (!trace.ok) for (const error of trace.errors) pushErr(ctx, ['decisionTrace', error.path], error.message);
+  const route = validateRouteDecision(raw.routeDecision);
+  if (!route.ok) for (const error of route.errors) pushErr(ctx, ['routeDecision', error.path], error.message);
+  const graph = validateExecutionGraph(raw.executionGraph);
+  if (!graph.ok) for (const error of graph.errors) pushErr(ctx, ['executionGraph', error.path], error.message);
+  const executionEstimateValid = validateExecutionEstimate(raw.executionEstimate);
+  if (!executionEstimateValid) pushErr(ctx, ['executionEstimate'], 'must be a valid ExecutionEstimate');
+  const capabilities = requireArray(ctx, ['capabilities'], raw.capabilities);
+  if (capabilities !== undefined) {
+    capabilities.forEach((value, index) => {
+      const item = checkObjectShape(ctx, ['capabilities', index], value, CAPABILITY_SUMMARY_KEYS);
+      if (!item) return;
+      requireId(ctx, ['capabilities', index, 'nodeId'], item.nodeId);
+      requireNonEmptyString(ctx, ['capabilities', index, 'role'], item.role, 256);
+      requireId(ctx, ['capabilities', index, 'capabilityId'], item.capabilityId);
+      requireNonEmptyString(ctx, ['capabilities', index, 'provider'], item.provider, 256);
+      const tools = requireArray(ctx, ['capabilities', index, 'tools'], item.tools);
+      if (tools !== undefined) tools.forEach((tool, toolIndex) => requireNonEmptyString(ctx, ['capabilities', index, 'tools', toolIndex], tool, 256));
+      requireEnum(ctx, ['capabilities', index, 'mutationClass'], item.mutationClass, ['READ_ONLY', 'LOCAL', 'EXTERNAL', 'DESTRUCTIVE'] as const);
+    });
+  }
+  if (ctx.errors.length > 0 || request === undefined || generatedAt === undefined || preflight === undefined || classification === undefined || !disclosure.ok || !trace.ok || !route.ok || !graph.ok || !executionEstimateValid || capabilities === undefined) return finalize(ctx, out);
+  return { ok: true, value: raw as unknown as SimulationResultEnvelope };
+}
+
+// ---------------------------------------------------------------------------
 // OperatorCommandOutcome
 // ---------------------------------------------------------------------------
 
-const OPERATOR_COMMAND_OUTCOME_KEYS = ['ok', 'text', 'errorCode', 'operatorSessionId', 'session', 'gate'] as const;
+const OPERATOR_COMMAND_OUTCOME_KEYS = ['ok', 'text', 'errorCode', 'operatorSessionId', 'session', 'gate', 'simulation', 'shadowObservation', 'policyDiff'] as const;
 
 const OPERATOR_COMMAND_ERROR_CODES: readonly OperatorCommandErrorCode[] = [
   'INVALID_COMMAND',
@@ -484,6 +578,8 @@ const OPERATOR_COMMAND_ERROR_CODES: readonly OperatorCommandErrorCode[] = [
   'FEATURE_SET_MISMATCH',
   'STAGE7_ROUTE_UNAVAILABLE',
   'STAGE7_CAPABILITY_UNAVAILABLE',
+  'FEATURE_DISABLED',
+  'EVALUATOR_ERROR',
 ];
 
 /** Validates the result of one `/operator` command invocation. `errorCode`
@@ -524,6 +620,22 @@ export function validateOperatorCommandOutcome(input: unknown): ValidationResult
       for (const e of result.errors) pushErr(ctx, ['gate', e.path], e.message);
     }
   }
+  let simulation: SimulationResultEnvelope | undefined;
+  if (hasOwn(raw, 'simulation')) {
+    const result = validateSimulationResult(raw.simulation);
+    if (result.ok) simulation = result.value;
+    else for (const error of result.errors) pushErr(ctx, ['simulation', error.path], error.message);
+  }
+  let shadowObservation: ShadowObservation | undefined;
+  if (hasOwn(raw, 'shadowObservation')) {
+    if (validateShadowObservation(raw.shadowObservation)) shadowObservation = raw.shadowObservation;
+    else pushErr(ctx, ['shadowObservation'], 'must be a valid ShadowObservation');
+  }
+  let policyDiff: PolicyDiffReport | undefined;
+  if (hasOwn(raw, 'policyDiff')) {
+    if (validatePolicyDiffReport(raw.policyDiff)) policyDiff = raw.policyDiff;
+    else pushErr(ctx, ['policyDiff'], 'must be a valid PolicyDiffReport');
+  }
 
   // Cross-field: ok and errorCode must never contradict each other.
   if (ok === true && hasOwn(raw, 'errorCode')) {
@@ -543,12 +655,24 @@ export function validateOperatorCommandOutcome(input: unknown): ValidationResult
   if (gate !== undefined && operatorSessionId !== undefined && gate.operatorSessionId !== operatorSessionId) {
     pushErr(ctx, ['gate', 'operatorSessionId'], 'must equal operatorSessionId');
   }
+  if (simulation !== undefined && (operatorSessionId !== undefined || session !== undefined || gate !== undefined)) {
+    pushErr(ctx, ['simulation'], 'must not be combined with session or gate state');
+  }
+  if (shadowObservation !== undefined && (operatorSessionId !== undefined || session !== undefined || gate !== undefined || simulation !== undefined)) {
+    pushErr(ctx, ['shadowObservation'], 'must not be combined with session, gate, or simulation state');
+  }
+  if (policyDiff !== undefined && (operatorSessionId !== undefined || session !== undefined || gate !== undefined || simulation !== undefined || shadowObservation !== undefined)) {
+    pushErr(ctx, ['policyDiff'], 'must not be combined with session, gate, simulation, or shadow state');
+  }
 
   if (ok === undefined || text === undefined) return finalize(ctx, out);
   if (hasOwn(raw, 'errorCode') && errorCode === undefined) return finalize(ctx, out);
   if (hasOwn(raw, 'operatorSessionId') && operatorSessionId === undefined) return finalize(ctx, out);
   if (hasOwn(raw, 'session') && session === undefined) return finalize(ctx, out);
   if (hasOwn(raw, 'gate') && gate === undefined) return finalize(ctx, out);
+  if (hasOwn(raw, 'simulation') && simulation === undefined) return finalize(ctx, out);
+  if (hasOwn(raw, 'shadowObservation') && shadowObservation === undefined) return finalize(ctx, out);
+  if (hasOwn(raw, 'policyDiff') && policyDiff === undefined) return finalize(ctx, out);
 
   out.ok = ok;
   out.text = text;
@@ -556,6 +680,9 @@ export function validateOperatorCommandOutcome(input: unknown): ValidationResult
   if (operatorSessionId !== undefined) out.operatorSessionId = operatorSessionId;
   if (session !== undefined) out.session = session;
   if (gate !== undefined) out.gate = gate;
+  if (simulation !== undefined) out.simulation = simulation;
+  if (shadowObservation !== undefined) out.shadowObservation = shadowObservation;
+  if (policyDiff !== undefined) out.policyDiff = policyDiff;
 
   return finalize<OperatorCommandOutcome>(ctx, out);
 }

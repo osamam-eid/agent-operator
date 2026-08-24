@@ -22,13 +22,50 @@ Type `/operator` + space for the full arrow-navigable command menu.
 | Command | Purpose |
 |---|---|
 | `/operator <request>` | Start a governed workflow session |
-| `/operator --dry-run <request>` | Preflight without dispatching |
-| `/operator --explain <request>` | Routing explanation only |
-| `/operator status · graph · why · explain` | Session / graph / routing detail |
+| `/operator --family <FAMILY> <request>` | Start with explicit intent classification; policy and gates still apply |
+| `/operator simulate <request>` | Compile and preflight without creating session state or dispatching |
+| `/operator --dry-run <request>` | Compatibility alias for `simulate` |
+| `/operator --explain <request>` | Persist a non-dispatching route explanation |
+| `/operator status · graph · why · explain` | Session / graph / structured decision detail |
+| `/operator shadow on · off · status` | Control semantic shadow comparison; never changes active routing |
+| `/operator shadow evaluate <request>` | Run one semantic comparison and store a request-hash-only observation |
+| `/operator competence status` | Show admitted evidence, human signals, and canary counts |
+| `/operator competence show <provider> [model]` | Inspect evidence-derived scorecards; never changes routing |
+| `/operator policy test --proposed <path> <request>` | Compare current/proposed routes and estimates without applying policy |
+| `/operator canary run <provider> [model]` | Run fixed, budgeted, read-only semantic qualification cases |
+| `/operator fleet bootstrap · list · add · show` | Manage the operator-owned provider catalog |
 | `/operator continue · cancel` | Drive the active session |
 | `/operator approve · reject <gate-id>` | Human-gate decisions (revision-bound) |
 | `/operator resume <session-id>` | Reload a persisted session after restart |
 | `/operator improve …` | Offline evaluator (see below) |
+
+## Execution safety evidence
+
+Failed nodes receive normalized, non-sensitive fingerprints. Fleet fallback
+attempts are stored as typed journals and shown by `why`. Governed mutations
+prepare recovery evidence before mutation, block changed paths or operation
+identity outside frozen scope, and carry structured risk summaries through
+existing graph-bound approval gates. None of these records authorize retry,
+fallback, rollback, publication, or broader mutation by themselves.
+
+## Context and evidence intelligence
+
+WP17 separates context requirement from representation and produces
+deterministic packing candidates. Required context is never dropped,
+forbidden context is never dispatched, and required overflow blocks. Raw
+evidence stays authoritative by digest; normalized evidence and decision
+briefs reference it. Retention evaluation only marks records eligible for an
+explicit deletion workflow and always preserves authoritative or active refs.
+
+## Governed intelligence activation
+
+Calibration reports remain partitioned by decision dimension and prediction
+identity. Canaries record evidence but never change provider status after one
+failure. Intelligence candidates bind classifier, calibration, competence,
+context, evidence, policy, compiler, and scorer digests. Promotion requires a
+clean evaluator recommendation plus exact human approval; `promotedBySystem`
+is always false. Rollback requires another human approval and restores only
+the recorded previous digest.
 
 ## The evaluator (`improve`)
 

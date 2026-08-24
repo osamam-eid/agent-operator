@@ -20,6 +20,7 @@ import type { AgentResult, AgentResultStatus } from '../contracts.js';
 import type { ActiveExecutionBatch, ExecutionBatchRequest, NodeExecutionAdapter, NodeExecutionAttempt, NodeExecutionOutcome, NodeExecutionRequest } from '../runtime-types.js';
 import type { NormalizedProviderRecord } from '../provider-fleet.js';
 import { SECRET_PATTERN } from '../stage7/qa/evidence.js';
+import type { ProviderFallbackAttempt, ProviderFallbackJournal } from '../execution-safety.js';
 
 export interface FleetProviderChain {
   readonly policy: 'COMPATIBLE_ONLY' | 'HUMAN_REQUIRED' | 'DISABLED';
@@ -199,6 +200,23 @@ function trialsSuffix(trials: readonly { readonly providerId: string; readonly f
   return ` [fleet-trials: ${JSON.stringify(trials)}]`;
 }
 
+function fallbackJournal(
+  chain: FleetProviderChain,
+  candidates: readonly NormalizedProviderRecord[],
+  attempts: readonly ProviderFallbackAttempt[],
+  selectedProvider: string | undefined,
+  finalOutcome: ProviderFallbackJournal['finalOutcome'],
+): ProviderFallbackJournal {
+  return {
+    schemaVersion: '1.0',
+    policy: chain.policy,
+    ...(candidates[0] === undefined ? {} : { initialProvider: candidates[0].providerId }),
+    ...(selectedProvider === undefined ? {} : { selectedProvider }),
+    attempts,
+    finalOutcome,
+  };
+}
+
 export class ExternalCliAdapter implements NodeExecutionAdapter {
   readonly adapterId = 'external-cli' as const;
   private readonly now: () => string;
@@ -250,14 +268,17 @@ export class ExternalCliAdapter implements NodeExecutionAdapter {
     const limit = chain.policy === 'COMPATIBLE_ONLY' ? 2 : 1;
     const candidates = chain.candidates.slice(0, limit);
     const trials: { readonly providerId: string; readonly failure: string }[] = [];
+    const journalAttempts: ProviderFallbackAttempt[] = [];
     for (const [index, record] of candidates.entries()) {
       if (record.mutability !== 'READ_ONLY') {
         trials.push({ providerId: record.providerId, failure: `mutating providers cannot serve READ_ONLY fleet nodes` });
+        journalAttempts.push({ providerId: record.providerId, modelId: record.models[0]?.id ?? record.providerId, phase: 'ELIGIBILITY', outcome: 'REJECTED', reasonCode: 'MUTATION_UNSAFE', disclosureCompatible: true, mutationSafe: false });
         continue;
       }
       const outsideTools = record.tools.filter((tool) => !node.toolGrant.includes(tool));
       if (outsideTools.length > 0) {
         trials.push({ providerId: record.providerId, failure: `declares tools outside the compiled grant: ${outsideTools.join(',')}` });
+        journalAttempts.push({ providerId: record.providerId, modelId: record.models[0]?.id ?? record.providerId, phase: 'ELIGIBILITY', outcome: 'REJECTED', reasonCode: 'TOOL_GRANT_INCOMPATIBLE', disclosureCompatible: true, mutationSafe: true });
         continue;
       }
       try {
@@ -265,19 +286,29 @@ export class ExternalCliAdapter implements NodeExecutionAdapter {
       } catch (error) {
         const failure = error instanceof Error ? error.message : String(error);
         trials.push({ providerId: record.providerId, failure });
+        journalAttempts.push({ providerId: record.providerId, modelId: record.models[0]?.id ?? record.providerId, phase: 'BINARY_VERIFICATION', outcome: 'FAILED', reasonCode: 'BINARY_VERIFY_FAILED', disclosureCompatible: true, mutationSafe: true });
         continue;
       }
+      journalAttempts.push({ providerId: record.providerId, modelId: record.models[0]?.id ?? record.providerId, phase: 'DISPATCH', outcome: 'SELECTED', reasonCode: index === 0 ? 'PRIMARY_SELECTED' : 'FALLBACK_SELECTED', disclosureCompatible: true, mutationSafe: true });
       const outcome = await runCandidate(record, node, signal, this.now);
       if (signal.aborted && outcome.result.status === 'UNKNOWN') return outcome;
       if (outcome.result.status === 'SUCCEEDED' || index === candidates.length - 1 || chain.policy === 'HUMAN_REQUIRED') {
+        journalAttempts.push({ providerId: record.providerId, modelId: record.models[0]?.id ?? record.providerId, phase: 'DISPATCH', outcome: outcome.result.status === 'SUCCEEDED' ? 'SUCCEEDED' : 'FAILED', reasonCode: `TERMINAL_${outcome.result.status}`, disclosureCompatible: true, mutationSafe: true });
         const suffix = trialsSuffix(trials);
-        if (suffix !== '') {
-          return { ...outcome, result: { ...outcome.result, summary: `${outcome.result.summary}${suffix}` } };
-        }
-        return outcome;
+        const result = suffix === '' ? outcome.result : { ...outcome.result, summary: `${outcome.result.summary}${suffix}` };
+        return {
+          ...outcome,
+          result,
+          fallbackJournal: fallbackJournal(chain, candidates, journalAttempts, record.providerId, outcome.result.status === 'SUCCEEDED' ? 'SUCCEEDED' : outcome.result.status === 'BLOCKED' ? 'BLOCKED' : outcome.result.status === 'UNKNOWN' ? 'UNKNOWN' : 'FAILED'),
+        };
       }
       trials.push({ providerId: record.providerId, failure: `terminal status ${outcome.result.status} is not fallback-eligible` });
-      return { ...outcome, result: { ...outcome.result, summary: `${outcome.result.summary}${trialsSuffix(trials)}` } };
+      journalAttempts.push({ providerId: record.providerId, modelId: record.models[0]?.id ?? record.providerId, phase: 'DISPATCH', outcome: 'FAILED', reasonCode: `TERMINAL_${outcome.result.status}`, disclosureCompatible: true, mutationSafe: true });
+      return {
+        ...outcome,
+        result: { ...outcome.result, summary: `${outcome.result.summary}${trialsSuffix(trials)}` },
+        fallbackJournal: fallbackJournal(chain, candidates, journalAttempts, record.providerId, outcome.result.status === 'BLOCKED' ? 'BLOCKED' : outcome.result.status === 'UNKNOWN' ? 'UNKNOWN' : 'FAILED'),
+      };
     }
     throw new ExternalCliAdapterError('FLEET_CANDIDATES_EXHAUSTED', `All ${trials.length} fleet candidate(s) failed pre-launch verification.${trialsSuffix(trials)}`);
   }

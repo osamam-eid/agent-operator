@@ -13,6 +13,7 @@ import type {
   TaskFamily,
   WorkflowTemplate,
 } from './contracts.js';
+import type { DecisionTrace, RuntimeDisclosureDecision } from './intelligence.js';
 
 /** Stage 3 remains mock-only. These flags describe future capabilities but
  * every dispatch-bearing flag is rejected while compiling this rollout. */
@@ -167,8 +168,20 @@ export interface RegisteredWorkflowTemplate {
   readonly nodeContracts: Readonly<Record<string, WorkflowNodeContract>>;
 }
 
+export interface CompiledCapabilitySummary {
+  readonly nodeId: string;
+  readonly role: string;
+  readonly capabilityId: string;
+  readonly provider: string;
+  readonly tools: readonly string[];
+  readonly mutationClass: MutationClass;
+}
+
 export interface CompiledWorkflow {
   readonly classification: ClassificationProposal;
+  readonly disclosureDecision: RuntimeDisclosureDecision;
+  readonly decisionTrace: DecisionTrace;
+  readonly capabilitySummaries: readonly CompiledCapabilitySummary[];
   readonly policy: ResolvedPolicy;
   readonly template: WorkflowTemplate;
   readonly routeDecision: RouteDecision;
@@ -178,6 +191,7 @@ export interface CompiledWorkflow {
 
 export type CompilationFailureCode =
   | 'CLASSIFICATION_INVALID'
+  | 'DISCLOSURE_BLOCKED'
   | 'CONFIG_INVALID'
   | 'PROJECT_POLICY_UNTRUSTED'
   | 'POLICY_CONFLICT'
@@ -203,6 +217,8 @@ export interface WorkflowCompilerContext {
   readonly now: string;
   /** Set only by explicit fleet invocation (e.g. a leading "--fleet" token); never by classification. */
   readonly fleetRoute?: true;
+  /** Explicit user-selected task family. This bypasses inference only. */
+  readonly familyOverride?: Exclude<TaskFamily, 'DIRECT'>;
 }
 
 export interface OperatorWorkflowCompiler {

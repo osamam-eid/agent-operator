@@ -32,9 +32,12 @@
 import { validateOperatorCommandOutcome, validateStoredOperatorSession } from './runtime-validators.js';
 import { StoreConflictError } from './store.js';
 import { existsSync, readFileSync , mkdirSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { parseOperatorCommand } from './commands.js';
 import { join, dirname } from 'node:path';
 import { bootstrapCatalog, defaultModelsYamlPath, fleetCatalogPath, loadCatalogFile, mergeCatalog, parseOmpModelsYaml, saveCatalogFile } from './fleet-catalog.js';
+import { validateProviderFallbackJournal } from './execution-safety.js';
+import { estimateCompiledWorkflow } from './policy-simulation.js';
 import { validateAgentResult } from './validation/results.js';
 import {
   beginExecutionBatch,
@@ -101,7 +104,22 @@ export class OperatorRuntime {
     } else {
       switch (parsed.kind) {
         case 'START':
-          outcome = await this.#handleStart(parsed.request, parsed.mode);
+          outcome = await this.#handleStart(parsed.request, parsed.mode, parsed.familyOverride);
+          break;
+        case 'SIMULATE':
+          outcome = await this.#handleSimulate(parsed.request, parsed.familyOverride);
+          break;
+        case 'POLICY_TEST':
+          outcome = await this.#handlePolicyTest(parsed.proposedPath, parsed.request, parsed.familyOverride);
+          break;
+        case 'CANARY':
+          outcome = await this.#handleCanary(parsed.providerId, parsed.modelId);
+          break;
+        case 'SHADOW':
+          outcome = await this.#handleShadow(parsed.subcommand, parsed.request, parsed.familyOverride);
+          break;
+        case 'COMPETENCE':
+          outcome = await this.#handleCompetence(parsed.subcommand, parsed.providerId, parsed.modelId);
           break;
         case 'EXPLAIN':
           outcome = await this.#handleExplain();
@@ -178,6 +196,10 @@ export class OperatorRuntime {
         }
         return completeExecutionBatch(current, sanitized, this.#deps.ids, now);
       });
+      const completedState = result.ok ? result.record.session.currentState : undefined;
+      if (result.ok && this.#deps.providerIntelligence !== undefined && (completedState === 'COMPLETED' || completedState === 'FAILED' || completedState === 'BLOCKED' || completedState === 'CANCELLED')) {
+        await this.#deps.providerIntelligence.recordTerminalSession(result.record).catch(() => undefined);
+      }
       if (result.ok) this.#activeBatches.delete(operatorSessionId);
       if (!result.ok) return result.outcome;
       if (result.record.session.currentState === 'FAILED') {
@@ -377,7 +399,15 @@ export class OperatorRuntime {
         validation.value.capabilityId === outcome.attempt.capabilityId;
       if (validation.ok && identityOk) {
         const usage = trustedUsage(outcome.usage);
-        return usage === undefined ? { attempt: outcome.attempt, result: validation.value } : { attempt: outcome.attempt, result: validation.value, usage };
+        const fallbackJournal = outcome.fallbackJournal !== undefined && validateProviderFallbackJournal(outcome.fallbackJournal)
+          ? outcome.fallbackJournal
+          : undefined;
+        return {
+          attempt: outcome.attempt,
+          result: validation.value,
+          ...(usage === undefined ? {} : { usage }),
+          ...(fallbackJournal === undefined ? {} : { fallbackJournal }),
+        };
       }
       const reason = validation.ok ? 'result identity did not match its attempt (operatorSessionId/nodeId/capabilityId)' : validation.errors.map((e) => `${e.path}: ${e.message}`).join('; ');
       const at = this.#deps.clock.now();
@@ -404,7 +434,7 @@ export class OperatorRuntime {
   // START
   // -------------------------------------------------------------------------
 
-  async #handleStart(request: string, mode: 'EXECUTE' | 'EXPLAIN' | 'DRY_RUN'): Promise<OperatorCommandOutcome> {
+  async #handleStart(request: string, mode: 'EXECUTE' | 'EXPLAIN', familyOverride?: WorkflowCompilerContext['familyOverride']): Promise<OperatorCommandOutcome> {
     if (this.#activeSessionId !== undefined) {
       const current = await this.#deps.store.load(this.#activeSessionId);
       const currentIsTerminal =
@@ -434,7 +464,15 @@ export class OperatorRuntime {
         return { ok: false, text: 'Fleet requests require a non-empty task after "--fleet".' };
       }
     }
-    const context: WorkflowCompilerContext = { projectRoot: this.#deps.projectRoot, operatorSessionId, graphId, gateId, now, ...(fleetRoute ? { fleetRoute: true as const } : {}) };
+    const context: WorkflowCompilerContext = {
+      projectRoot: this.#deps.projectRoot,
+      operatorSessionId,
+      graphId,
+      gateId,
+      now,
+      ...(fleetRoute ? { fleetRoute: true as const } : {}),
+      ...(familyOverride !== undefined ? { familyOverride } : {}),
+    };
     const compilation = await this.#deps.compiler.compile(effectiveRequest, context);
     if (!compilation.ok) {
       return {
@@ -443,13 +481,10 @@ export class OperatorRuntime {
         errorCode: 'COMPILATION_FAILED',
       };
     }
-
-    if (mode === 'DRY_RUN' && this.#deps.preflight !== undefined) {
-      const preflight = await this.#deps.preflight(compilation.compiled, context);
-      if (!preflight.ok) {
-        return { ok: false, text: `Dry-run preflight failed: ${preflight.message}`, errorCode: preflight.code };
-      }
+    if (this.#deps.shadowRouting !== undefined) {
+      await this.#deps.shadowRouting.observeIfEnabled(effectiveRequest, compilation.compiled, context).catch(() => undefined);
     }
+
 
     const startupFeatureSetHash = this.#deps.stage7FeatureSet?.stage7Enabled === true ? this.#deps.stage7FeatureSet.hash : undefined;
     const record = startSession(request, mode, operatorSessionId, compilation.compiled, now, startupFeatureSetHash);
@@ -464,15 +499,111 @@ export class OperatorRuntime {
     const text =
       mode === 'EXPLAIN'
         ? `Explain-only plan built for session ${record.session.operatorSessionId} (workflow "${compilation.compiled.template.templateId}"); it never dispatches. Use status/graph/why to inspect it, or cancel it.`
-        : mode === 'DRY_RUN'
-          ? `Dry-run preflight passed for session ${record.session.operatorSessionId} (workflow "${compilation.compiled.template.templateId}"); no provider session was created and no request was submitted to a model. Use status/graph/why to inspect it, or cancel it.`
-          : `Session ${record.session.operatorSessionId} started and awaiting ${openedGate?.decisionType ?? 'approval'} on gate ${openedGate?.gateId ?? '<none>'}.`;
+        : `Session ${record.session.operatorSessionId} started and awaiting ${openedGate?.decisionType ?? 'approval'} on gate ${openedGate?.gateId ?? '<none>'}.`;
     return {
       ok: true,
       text,
       operatorSessionId: record.session.operatorSessionId,
       session: record.session,
       ...(openedGate !== undefined ? { gate: openedGate } : {}),
+    };
+  }
+
+  async #handleSimulate(request: string, familyOverride?: WorkflowCompilerContext['familyOverride']): Promise<OperatorCommandOutcome> {
+    const now = this.#deps.clock.now();
+    let fleetRoute = false;
+    let effectiveRequest = request.trim();
+    if (effectiveRequest.startsWith('--fleet')) {
+      fleetRoute = true;
+      effectiveRequest = effectiveRequest.slice('--fleet'.length).trim();
+      if (effectiveRequest === '') return { ok: false, text: 'Fleet requests require a non-empty task after "--fleet".', errorCode: 'INVALID_COMMAND' };
+    }
+    const digest = createHash('sha256').update(`${this.#deps.projectRoot}\n${effectiveRequest}\n${now}`, 'utf8').digest('hex').slice(0, 24);
+    const context: WorkflowCompilerContext = {
+      projectRoot: this.#deps.projectRoot,
+      operatorSessionId: `simulation:${digest}`,
+      graphId: `simulation-graph:${digest}`,
+      gateId: `simulation-gate:${digest}`,
+      now,
+      ...(fleetRoute ? { fleetRoute: true as const } : {}),
+      ...(familyOverride !== undefined ? { familyOverride } : {}),
+    };
+    const compilation = await this.#deps.compiler.compile(effectiveRequest, context);
+    if (!compilation.ok) {
+      return { ok: false, text: `Simulation compilation failed (${compilation.code}): ${compilation.message}`, errorCode: 'COMPILATION_FAILED' };
+    }
+    let preflight: 'PASSED' | 'NOT_CONFIGURED' = 'NOT_CONFIGURED';
+    if (this.#deps.preflight !== undefined) {
+      const result = await this.#deps.preflight(compilation.compiled, context);
+      if (!result.ok) return { ok: false, text: `Simulation preflight failed: ${result.message}`, errorCode: result.code };
+      preflight = 'PASSED';
+    }
+    const compiled = compilation.compiled;
+    return {
+      ok: true,
+      text: `Simulation compiled workflow "${compiled.template.templateId}" with ${compiled.executionGraph.nodes.length} node(s); no session, gate, provider, tool, or mutation was created.`,
+      simulation: {
+        schemaVersion: '1.0',
+        request: effectiveRequest,
+        generatedAt: now,
+        classification: compiled.classification,
+        disclosureDecision: compiled.disclosureDecision,
+        routeDecision: compiled.routeDecision,
+        executionGraph: compiled.executionGraph,
+        executionEstimate: estimateCompiledWorkflow(compiled),
+        capabilities: compiled.capabilitySummaries,
+        decisionTrace: compiled.decisionTrace,
+        preflight,
+      },
+    };
+  }
+
+  async #handleShadow(
+    subcommand: 'ON' | 'OFF' | 'STATUS' | 'EVALUATE',
+    request?: string,
+    familyOverride?: WorkflowCompilerContext['familyOverride'],
+  ): Promise<OperatorCommandOutcome> {
+    const shadow = this.#deps.shadowRouting;
+    if (shadow === undefined) return { ok: false, text: 'Semantic shadow routing is unavailable in this runtime.', errorCode: 'FEATURE_DISABLED' };
+    if (subcommand === 'ON' || subcommand === 'OFF') {
+      shadow.setEnabled(subcommand === 'ON');
+      return { ok: true, text: `Semantic shadow routing is ${subcommand === 'ON' ? 'enabled' : 'disabled'}; it cannot change active routes.` };
+    }
+    if (subcommand === 'STATUS') {
+      const status = shadow.status();
+      return {
+        ok: true,
+        text: `Semantic shadow routing is ${status.enabled ? 'enabled' : 'disabled'}.${status.latest === undefined ? '' : ` Latest observation: ${status.latest.observationId} (${status.latest.candidate.status}).`}`,
+        ...(status.latest === undefined ? {} : { shadowObservation: status.latest }),
+      };
+    }
+    if (request === undefined || request.trim() === '') return { ok: false, text: 'shadow evaluate requires a request.', errorCode: 'INVALID_COMMAND' };
+
+    const now = this.#deps.clock.now();
+    let fleetRoute = false;
+    let effectiveRequest = request.trim();
+    if (effectiveRequest.startsWith('--fleet')) {
+      fleetRoute = true;
+      effectiveRequest = effectiveRequest.slice('--fleet'.length).trim();
+      if (effectiveRequest === '') return { ok: false, text: 'Fleet requests require a non-empty task after "--fleet".', errorCode: 'INVALID_COMMAND' };
+    }
+    const digest = createHash('sha256').update(`shadow\n${this.#deps.projectRoot}\n${effectiveRequest}\n${now}`, 'utf8').digest('hex').slice(0, 24);
+    const context: WorkflowCompilerContext = {
+      projectRoot: this.#deps.projectRoot,
+      operatorSessionId: `shadow-primary:${digest}`,
+      graphId: `shadow-primary-graph:${digest}`,
+      gateId: `shadow-primary-gate:${digest}`,
+      now,
+      ...(fleetRoute ? { fleetRoute: true as const } : {}),
+      ...(familyOverride !== undefined ? { familyOverride } : {}),
+    };
+    const compilation = await this.#deps.compiler.compile(effectiveRequest, context);
+    if (!compilation.ok) return { ok: false, text: `Shadow incumbent compilation failed (${compilation.code}): ${compilation.message}`, errorCode: 'COMPILATION_FAILED' };
+    const observation = await shadow.evaluate(effectiveRequest, compilation.compiled, context);
+    return {
+      ok: true,
+      text: `Shadow observation ${observation.observationId}: incumbent ${observation.primary.family}/${observation.primary.workflow}; candidate ${observation.candidate.status}${observation.candidate.family === undefined ? '' : `/${observation.candidate.family}`}; no active route changed.`,
+      shadowObservation: observation,
     };
   }
 
@@ -496,13 +627,73 @@ export class OperatorRuntime {
     return { ok: true, text, operatorSessionId: session.operatorSessionId, session };
   }
 
+  async #handleCanary(providerId: string, modelId?: string): Promise<OperatorCommandOutcome> {
+    const canary = this.#deps.providerCanary;
+    if (canary === undefined) return { ok: false, text: 'Provider canary execution is unavailable in this runtime.', errorCode: 'FEATURE_DISABLED' };
+    try {
+      const observations = await canary.run(providerId, modelId);
+      const passed = observations.filter((observation) => observation.outcome === 'PASSED').length;
+      return { ok: true, text: `Provider canary completed ${observations.length} fixed read-only case(s) for ${providerId}${modelId === undefined ? '' : `/${modelId}`}: ${passed} passed, ${observations.length - passed} did not pass. No provider status or route changed.` };
+    } catch (error) {
+      return { ok: false, text: `Provider canary failed closed: ${error instanceof Error ? error.message : 'unknown canary failure'}`, errorCode: 'EVALUATOR_ERROR' };
+    }
+  }
+
+  async #handlePolicyTest(proposedPath: string, request: string, familyOverride?: WorkflowCompilerContext['familyOverride']): Promise<OperatorCommandOutcome> {
+    const policySimulation = this.#deps.policySimulation;
+    if (policySimulation === undefined) return { ok: false, text: 'Policy simulation is unavailable in this runtime.', errorCode: 'FEATURE_DISABLED' };
+    const now = this.#deps.clock.now();
+    let fleetRoute = false;
+    let effectiveRequest = request.trim();
+    if (effectiveRequest.startsWith('--fleet')) {
+      fleetRoute = true;
+      effectiveRequest = effectiveRequest.slice('--fleet'.length).trim();
+    }
+    const digest = createHash('sha256').update(`policy\n${proposedPath}\n${effectiveRequest}\n${now}`, 'utf8').digest('hex').slice(0, 24);
+    const context: WorkflowCompilerContext = {
+      projectRoot: this.#deps.projectRoot,
+      operatorSessionId: `policy:${digest}`,
+      graphId: `policy-graph:${digest}`,
+      gateId: `policy-gate:${digest}`,
+      now,
+      ...(fleetRoute ? { fleetRoute: true as const } : {}),
+      ...(familyOverride === undefined ? {} : { familyOverride }),
+    };
+    try {
+      const report = await policySimulation.test(proposedPath, effectiveRequest, context);
+      return {
+        ok: true,
+        text: `Policy test ${report.reportId}: ${report.changes.length === 0 ? 'no behavior changes' : `changes [${report.changes.join(', ')}]`}; proposed policy was not applied. Hard invariants unchanged: ${report.unchangedHardInvariants.join(', ')}.`,
+        policyDiff: report,
+      };
+    } catch (error) {
+      return { ok: false, text: `Policy test failed: ${error instanceof Error ? error.message : 'invalid proposed policy'}`, errorCode: 'INVALID_COMMAND' };
+    }
+  }
+
+  async #handleCompetence(subcommand: 'STATUS' | 'SHOW', providerId?: string, modelId?: string): Promise<OperatorCommandOutcome> {
+    const intelligence = this.#deps.providerIntelligence;
+    if (intelligence === undefined) return { ok: false, text: 'Provider intelligence is unavailable in this runtime.', errorCode: 'FEATURE_DISABLED' };
+    if (subcommand === 'STATUS') {
+      const status = await intelligence.status();
+      const overrides = await intelligence.overrideMetrics();
+      return { ok: true, text: `Provider intelligence: ${status.admitted}/${status.evidence} evidence records admitted, ${status.overrides} human signals (${overrides.rejections} rejections), ${status.canaries} canary observations.` };
+    }
+    if (providerId === undefined) return { ok: false, text: 'competence show requires a provider id.', errorCode: 'INVALID_COMMAND' };
+    const snapshots = await intelligence.scorecards(providerId, modelId);
+    const text = snapshots.length === 0
+      ? `No qualified competence evidence exists for ${providerId}${modelId === undefined ? '' : `/${modelId}`}.`
+      : snapshots.map((snapshot) => `${snapshot.providerId}/${snapshot.modelId} ${snapshot.role}/${snapshot.taskFamily}/${snapshot.capabilityId}: n=${snapshot.qualifiedSampleCount}, success=${snapshot.successRate.toFixed(3)}, confidence=${snapshot.confidence}, interval=${snapshot.confidenceInterval.map((value) => value.toFixed(3)).join('-')}`).join('\n');
+    return { ok: true, text };
+  }
+
   /** Renders the actual compiled route: real selected capability/provider
    * assignments, real rejected alternatives, and real provider-health-driven
    * fallback decisions — never fixed placeholder wording. */
   async #handleWhy(): Promise<OperatorCommandOutcome> {
     const loaded = await this.#loadActive();
     if (!loaded.ok) return loaded.outcome;
-    const { session } = loaded.record;
+    const { session, disclosureDecision, decisionTrace } = loaded.record;
     if (session.routeDecision === null) {
       return { ok: true, text: `Session ${session.operatorSessionId} has no route decision yet.`, operatorSessionId: session.operatorSessionId, session };
     }
@@ -514,13 +705,26 @@ export class OperatorRuntime {
         .map((alternative) => `${alternative.option}:${alternative.reasonCode}${alternative.details !== undefined ? ` (${alternative.details})` : ''}`)
         .join(', ') || 'none';
     const fallbacks = route.fallbackDecisions.map((fallback) => `${fallback.role}:${fallback.from}->${fallback.to}/${fallback.reasonCode}`).join(', ') || 'none';
+    const trace = decisionTrace === undefined
+      ? 'Decision trace: unavailable for this legacy session.'
+      : `Decision trace: ${decisionTrace.entries.map((entry) => `${entry.stage}[${entry.reasonCodes.join('/')}]: ${entry.summary}`).join(' | ')}.`;
+    const disclosure = disclosureDecision === undefined
+      ? 'Disclosure: unavailable for this legacy session.'
+      : `Disclosure: ${disclosureDecision.disclosureClass} (${disclosureDecision.reasonCodes.join(', ')}). Classifier identity: ${disclosureDecision.predictionIdentity}.`;
+    const fingerprints = Object.entries(loaded.record.nodeResultRefs)
+      .flatMap(([nodeId, refs]) => refs.failureFingerprint === undefined ? [] : [`${nodeId}:${refs.failureFingerprint.reasonCode}/${refs.failureFingerprint.fingerprint}`])
+      .join(', ') || 'none';
+    const runtimeFallbacks = Object.entries(loaded.record.nodeResultRefs)
+      .flatMap(([nodeId, refs]) => refs.fallbackJournal === undefined ? [] : [`${nodeId}:${refs.fallbackJournal.attempts.map((attempt) => `${attempt.providerId}/${attempt.phase}/${attempt.outcome}/${attempt.reasonCode}`).join('>')}=>${refs.fallbackJournal.finalOutcome}`])
+      .join(', ') || 'none';
     const text =
-      `Classification: ${route.requestClassification}. Risk: ${route.riskClassification}. ` +
+      `Classification: ${route.requestClassification}. Risk: ${route.riskClassification}. ${disclosure} ` +
       `Workflow: ${route.selectedWorkflow}, graph revision ${graphRevision}. Roles/providers and capability fit: ${roles}. ` +
       `Rejected alternatives: ${rejected}. Required gates: ${route.requiredGates.join(', ') || 'none'}. ` +
       `Budget effect: ${JSON.stringify(route.budgetEffect)}. Provider health/fallback decisions: ${fallbacks}. ` +
+      `Runtime fallback journal: ${runtimeFallbacks}. Failure fingerprints: ${fingerprints}. ` +
       `Policy refs: ${route.policyRefs.join(', ')}. Confidence: ${route.confidence}; abstained: ${route.abstention.abstained}` +
-      `${route.abstention.reason !== undefined ? ` (${route.abstention.reason})` : ''}.`;
+      `${route.abstention.reason !== undefined ? ` (${route.abstention.reason})` : ''}. ${trace}`;
     return { ok: true, text, operatorSessionId: session.operatorSessionId, session };
   }
 
@@ -572,6 +776,10 @@ export class OperatorRuntime {
     const result = await this.#applyWithCas(operatorSessionId, (current, now) => decideGate(current, gateId, decision, this.#deps.ids, now));
     if (!result.ok) return result.outcome;
     const decidedGate = result.record.gates.find((g) => g.gateId === gateId);
+    const humanDecision = result.record.session.humanDecisions.at(-1);
+    if (humanDecision !== undefined && this.#deps.providerIntelligence !== undefined) {
+      await this.#deps.providerIntelligence.recordHumanDecision(result.record, humanDecision).catch(() => undefined);
+    }
     const text = this.#describeDecisionOutcome(gateId, decision, result.record);
     return {
       ok: true,

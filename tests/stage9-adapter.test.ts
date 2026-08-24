@@ -4,6 +4,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { NodeExecutionRequest } from '../src/runtime-types.js';
+import type { ProviderFallbackJournal } from '../src/execution-safety.js';
 import type { NormalizedProviderRecord } from '../src/provider-fleet.js';
 import { ExternalCliAdapter, type FleetProviderChain } from '../src/adapters/external-cli.js';
 
@@ -56,11 +57,11 @@ function chain(policy: FleetProviderChain['policy'], candidates: readonly Normal
 
 const NOW = (): string => new Date().toISOString();
 
-async function launch(adapter: ExternalCliAdapter, nodeRequest: NodeExecutionRequest): Promise<{ status: string; summary: string }> {
+async function launch(adapter: ExternalCliAdapter, nodeRequest: NodeExecutionRequest): Promise<{ readonly status: string; readonly summary: string; readonly fallbackJournal?: ProviderFallbackJournal }> {
   const batch = adapter.launchBatch({ batchId: 'batch-1', nodes: [nodeRequest], launchedBy: 'test', requestedBy: 'test', graphHash: 'a'.repeat(64), workflowTemplateId: 'fleet.v1' } as never);
   const outcomes = await batch.completion;
   const outcome = outcomes[0]!;
-  return { status: outcome.result.status, summary: outcome.result.summary };
+  return { status: outcome.result.status, summary: outcome.result.summary, ...(outcome.fallbackJournal === undefined ? {} : { fallbackJournal: outcome.fallbackJournal }) };
 }
 
 describe('Stage-9B external-cli adapter', () => {
@@ -102,9 +103,13 @@ describe('Stage-9B external-cli adapter', () => {
 
   test('bounded fallback tries the second candidate after a pre-launch failure of the first', async () => {
     const adapter = new ExternalCliAdapter({ resolveChain: chain('COMPATIBLE_ONLY', [missing, good]), now: NOW });
-    const { status, summary } = await launch(adapter, request());
+    const { status, summary, fallbackJournal } = await launch(adapter, request());
     expect(status).toBe('SUCCEEDED');
     expect(summary).toContain('fleet-trials');
+    expect(fallbackJournal?.initialProvider).toBe('missing-cli');
+    expect(fallbackJournal?.selectedProvider).toBe('good-cli');
+    expect(fallbackJournal?.attempts.map((attempt) => attempt.reasonCode)).toEqual(['BINARY_VERIFY_FAILED', 'FALLBACK_SELECTED', 'TERMINAL_SUCCEEDED']);
+    expect(fallbackJournal?.finalOutcome).toBe('SUCCEEDED');
     expect(summary).toContain('missing-cli');
   });
 

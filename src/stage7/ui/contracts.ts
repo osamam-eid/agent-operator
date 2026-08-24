@@ -2,6 +2,7 @@ import type { AgentResult, AgentResultStatus } from '../../contracts.js';
 import type { ActiveExecutionBatch, ExecutionBatchRequest, NodeExecutionAdapter, NodeExecutionRequest, NodeExecutionOutcome } from '../../runtime-types.js';
 import type { GovernedMutationRequest, GovernedMutationResult, VerificationPorts, WorktreeHandle, WorktreePort, WorktreeSnapshot } from '../../mutation/worktree.js';
 import type { MutationClock } from '../../mutation/governed.js';
+import type { RecoveryPackagePort } from '../../execution-safety.js';
 import type { CandidateCapturePort, CandidateCaptureRequest, CandidateCaptureResult, GovernedUiImplementationPort, ProvisionalCandidateStore, Stage7ArtifactEnvelope, Stage7SecretScan, UiExecutionGrant } from '../types.js';
 
 export const UI_WORKFLOW_TEMPLATE = 'ui-change.v2' as const;
@@ -113,6 +114,7 @@ export interface UiImplementationDependencies {
   readonly provisional: ProvisionalCandidateStore;
   readonly verification: VerificationPorts;
   readonly clock: MutationClock;
+  readonly recovery: RecoveryPackagePort;
   readonly captureContext: () => Omit<CandidateCaptureRequest, 'worktree' | 'baseline' | 'changedPaths'>;
 }
 

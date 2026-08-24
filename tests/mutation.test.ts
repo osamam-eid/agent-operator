@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
+import { createRecoveryPackagePort, MemoryRecoveryPackageStore, type RecoveryPackage, type RecoveryPackagePort } from '../src/execution-safety.js';
 
 import { GovernedMutationExecutor } from '../src/mutation/governed.js';
 import type { MutationScope, WorktreeHandle, WorktreePort } from '../src/mutation/worktree.js';
@@ -29,6 +31,7 @@ class FakeWorktreePort implements WorktreePort {
   changedPaths: readonly string[] = ['src/file.ts'];
   failure: 'mutation' | 'scope' | undefined;
   behavioralPassed = true;
+  mutationCalls = 0;
   conformancePassed = true;
 
   async createIsolated(): Promise<WorktreeHandle> { return this.handle; }
@@ -38,6 +41,7 @@ class FakeWorktreePort implements WorktreePort {
     return { identity: this.baselineIdentity, digest: 'digest', capturedAt: '2026-01-01T00:00:00.000Z' };
   }
   async executeMutation(): Promise<void> {
+    this.mutationCalls += 1;
     if (this.failure === 'mutation') throw new Error('mutation failed');
   }
   async diff(): Promise<readonly string[]> {
@@ -51,7 +55,7 @@ const verification = (port: FakeWorktreePort): VerificationPorts => ({
 });
 
 function executor(port: FakeWorktreePort): GovernedMutationExecutor {
-  return new GovernedMutationExecutor(port, verification(port), { now: () => '2026-01-01T00:00:00.000Z' });
+  return new GovernedMutationExecutor(port, verification(port), { now: () => '2026-01-01T00:00:00.000Z' }, createRecoveryPackagePort(new MemoryRecoveryPackageStore()));
 }
 
 describe('GovernedMutationExecutor worktree ownership', () => {
@@ -59,6 +63,32 @@ describe('GovernedMutationExecutor worktree ownership', () => {
     const port = new FakeWorktreePort();
     const result = await executor(port).execute(request);
     expect(result.worktreeRemoved).toBe(true);
+    expect(port.removed).toHaveLength(1);
+  });
+
+  test('prepares recovery before mutation and closes it after cleanup', async () => {
+    const port = new FakeWorktreePort();
+    const statuses: string[] = [];
+    const recovery: RecoveryPackagePort = {
+      async prepare(_request, _worktree, _baseline, now) {
+        statuses.push('PREPARED');
+        return { schemaVersion: '1.0', recoveryId: 'r'.repeat(64), worktreeId: 'worktree-1', worktreeIdentity: 'worktree-1', baselineIdentity: 'baseline', baselineDigest: 'digest', scopeHash: 'scope', contractHash: 'contract', graphHash: 'graph', allowedPaths: ['src/file.ts'], changedPaths: [], mutationClass: 'LOCAL', status: 'PREPARED', createdAt: now, updatedAt: now };
+      },
+      async update(current: RecoveryPackage, input) {
+        statuses.push(input.status);
+        return { ...current, status: input.status, changedPaths: input.changedPaths ?? current.changedPaths, updatedAt: input.now };
+      },
+    };
+    const governed = new GovernedMutationExecutor(port, verification(port), { now: () => '2026-01-01T00:00:00.000Z' }, recovery);
+    await governed.execute(request);
+    expect(statuses).toEqual(['PREPARED', 'MUTATED', 'VERIFIED', 'CLEANED']);
+  });
+
+  test('authorized-operation drift blocks before mutation', async () => {
+    const port = new FakeWorktreePort();
+    const authorizedOperationHash = createHash('sha256').update('different operation').digest('hex');
+    await expect(executor(port).execute({ ...request, scope: { ...scope, authorizedOperationHash } })).rejects.toMatchObject({ reasonCode: 'SCOPE_DRIFT_DETECTED' });
+    expect(port.mutationCalls).toBe(0);
     expect(port.removed).toHaveLength(1);
   });
 

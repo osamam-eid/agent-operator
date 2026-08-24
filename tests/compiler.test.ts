@@ -170,6 +170,12 @@ describe('Stage3WorkflowCompiler global plan', () => {
     expect(result.compiled.routeDecision.rejectedAlternatives).toEqual([]);
     expect(result.compiled.routeDecision.requiredGates[0]).toBe('EXECUTION_APPROVAL');
     expect(result.compiled.initialGate).not.toBeNull();
+    expect(result.compiled.initialGate?.riskSummary).toMatchObject({
+      riskLevel: 'LOW',
+      disclosureClass: 'INTERNAL_REDACTABLE',
+      recoveryRequired: false,
+    });
+    expect(result.compiled.initialGate?.riskSummary?.actionsNotPerformed[0]).toContain('No commit, push, merge, deployment');
     const nodeIds = result.compiled.executionGraph.nodes.map((node) => node.nodeId);
     expect(nodeIds).not.toContain('scope-freeze');
     expect(nodeIds).not.toContain('adversarial-review');
@@ -187,6 +193,45 @@ describe('Stage3WorkflowCompiler global plan', () => {
     expect(result.compiled.classification.requestClassification).toBe('PLAN');
     expect(result.compiled.classification.confidence).toBe('MEDIUM');
     expect(result.compiled.routeDecision.selectedWorkflow).toBe('plan.v1');
+  });
+
+  test('explicit family selection bypasses inference but retains policy compilation', async () => {
+    const compiler = compilerWith({}, {
+      classifier: { classify: () => { throw new Error('inference must not run'); } },
+    });
+    const result = await compiler.compile('describe the rollout', context({ familyOverride: 'PLAN' }));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.compiled.classification.requestClassification).toBe('PLAN');
+    expect(result.compiled.classification.confidence).toBe('HIGH');
+    expect(result.compiled.disclosureDecision.disclosureClass).toBe('INTERNAL_REDACTABLE');
+    expect(result.compiled.decisionTrace.entries.map((entry) => entry.stage)).toEqual([
+      'CLASSIFICATION',
+      'PROJECT_TRUST',
+      'DISCLOSURE',
+      'POLICY',
+      'WORKFLOW_SELECTION',
+      'CAPABILITY_SELECTION',
+      'GRAPH_COMPILATION',
+    ]);
+    expect(result.compiled.capabilitySummaries.length).toBe(result.compiled.executionGraph.nodes.length);
+  });
+
+  test('credential-bearing fleet intent is blocked before fleet capability selection', async () => {
+    let selectorCalls = 0;
+    const compiler = compilerWith({}, {
+      fleetCapabilitySelect: () => {
+        selectorCalls += 1;
+        throw new Error('selector must not run');
+      },
+    });
+    const result = await compiler.compile('plan with api_key=fixture-secret-value', context({ fleetRoute: true }));
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('DISCLOSURE_BLOCKED');
+    expect(selectorCalls).toBe(0);
   });
 });
 

@@ -24,6 +24,7 @@ export function createGovernedUiImplementationPort(dependencies: UiImplementatio
     capturingWorktrees,
     dependencies.verification,
     dependencies.clock,
+    dependencies.recovery,
   );
   const bufferedPromotions = new Map<string, Stage7ArtifactEnvelope>();
   return new FrozenGovernedUiImplementationAdapter(executor, dependencies.provisional, () => capturingWorktrees.lastCandidateId, { register: (artifact) => { assertCandidateArtifact(artifact); bufferedPromotions.set(artifact.artifactId, structuredClone(artifact)); } });

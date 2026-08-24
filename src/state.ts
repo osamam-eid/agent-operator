@@ -16,10 +16,8 @@
  *
  *   START(EXECUTE)  -> AWAITING_HUMAN (first required gate open)
  *   START(EXPLAIN)  -> PLANNING (no gate; structurally cannot dispatch)
- *   START(DRY_RUN)  -> PLANNING (no gate; structurally cannot dispatch;
- *                       identical shape to EXPLAIN — the extra preflight
- *                       checks are a controller-level, non-persisted
- *                       concern, plan §6.1)
+ *   SIMULATE never enters this reducer; it compiles/preflights without
+ *   creating session state.
  *   APPROVE (gate 0, pre-execution)
  *                   -> READY (gate consumed, humanDecision recorded,
  *                      initially-eligible nodes promoted to READY)
@@ -107,6 +105,7 @@ import { cancelExecutionBatch, reconcileExecutionBatch } from './state/lifecycle
 import { journalEventForStatus, mapAgentResultStatusToNodeState, outcomeMatchesActiveAttempt, toNodeResultRefs } from './state/outcomes.js';
 import { promoteReadyNodes, selectReadyBatch, type BatchSelectionPolicy } from './state/scheduling.js';
 import { degradedOptionalNodeIds, deriveVerificationState } from './state/verification.js';
+import { createFailureFingerprint } from './execution-safety.js';
 
 export { selectReadyBatch, type BatchSelectionPolicy };
 export { isTransitionError, type OperatorTransitionError };
@@ -142,11 +141,11 @@ export function deriveAttemptId(params: {
  * exact `operatorSessionId`/`graphId`/`gateId` the controller allocated
  * before compiling. EXECUTE mode requires at least one required gate (the
  * compiler-supplied `initialGate`, matching `routeDecision.requiredGates[0]`);
- * no execution ever occurs before that first approval. EXPLAIN and DRY_RUN
- * are structurally identical here: a plan that can never dispatch. */
+ * EXPLAIN is a persisted non-dispatching plan. Simulation never enters this
+ * reducer and therefore cannot create session state. */
 export function startSession(
   request: string,
-  mode: 'EXECUTE' | 'EXPLAIN' | 'DRY_RUN',
+  mode: 'EXECUTE' | 'EXPLAIN',
   operatorSessionId: string,
   compiled: CompiledWorkflow,
   now: string,
@@ -183,12 +182,14 @@ export function startSession(
     timestamp: now,
     eventType: 'SESSION_STARTED',
     operatorSessionId,
-    message: mode === 'EXECUTE' ? `Session started for request: ${request}` : `${mode === 'EXPLAIN' ? 'Explain-only' : 'Dry-run'} plan built for request: ${request}`,
+    message: mode === 'EXECUTE' ? `Session started for request: ${request}` : `Explain-only plan built for request: ${request}`,
   });
 
   const baseRecord: StoredOperatorSession = {
     schemaVersion: '1.0',
     ...(startupFeatureSetHash !== undefined ? { startupFeatureSetHash } : {}),
+    disclosureDecision: compiled.disclosureDecision,
+    decisionTrace: compiled.decisionTrace,
     session: started,
     gates: [],
     maxConcurrency: Math.max(1, compiled.policy.maxConcurrency),
@@ -196,10 +197,10 @@ export function startSession(
     nodeResultRefs: {},
   };
 
-  if (mode === 'EXPLAIN' || mode === 'DRY_RUN') {
+  if (mode === 'EXPLAIN') {
     const nonDispatchSession: OperatorSession = {
       ...started,
-      currentPhase: mode === 'EXPLAIN' ? 'Explain-only plan ready (no dispatch)' : 'Dry-run preflight plan ready (no dispatch)',
+      currentPhase: 'Explain-only plan ready (no dispatch)',
     };
     return { ...baseRecord, session: nonDispatchSession };
   }
@@ -331,6 +332,7 @@ export function decideGate(
         record.session.artifacts,
         ids.next('gate'),
         now,
+        record.gates[0]?.riskSummary,
       );
       const awaiting: OperatorSession = {
         ...sessionSansGate,
@@ -612,7 +614,9 @@ export function completeExecutionBatch(
   for (const outcome of applicable) {
     const result = outcome.result;
     delete nextActiveAttempts[result.nodeId];
-    const resultRefs = toNodeResultRefs(result, outcome.attempt, now, outcome.usage);
+    const node = graph.nodes.find((candidate) => candidate.nodeId === result.nodeId);
+    const failureFingerprint = outcome.failureFingerprint ?? createFailureFingerprint(outcome, node?.mutation?.mutationClass ?? 'READ_ONLY');
+    const resultRefs = toNodeResultRefs(result, outcome.attempt, now, outcome.usage, failureFingerprint, outcome.fallbackJournal);
     const dispositionBlocksProgression = resultRefs.recommendedDisposition === 'BLOCK' || resultRefs.recommendedDisposition === 'HUMAN_DECISION' || resultRefs.recommendedDisposition === 'CORRECT';
     nodeStates[result.nodeId] = dispositionBlocksProgression ? 'BLOCKED' : mapAgentResultStatusToNodeState(result.status);
     nextNodeResultRefs[result.nodeId] = resultRefs;
@@ -628,6 +632,26 @@ export function completeExecutionBatch(
           : `Node "${result.nodeId}" returned ${result.status}: ${result.summary}`,
       },
     );
+    if (failureFingerprint !== undefined) {
+      session = appendJournal(session, {
+        timestamp: now,
+        eventType: 'FAILURE_FINGERPRINTED',
+        operatorSessionId: session.operatorSessionId,
+        nodeId: result.nodeId,
+        reasonCode: failureFingerprint.reasonCode,
+        message: `Failure fingerprint ${failureFingerprint.fingerprint} recorded for ${failureFingerprint.adapterId}/${failureFingerprint.modelProvider}/${failureFingerprint.modelId}.`,
+      });
+    }
+    if (outcome.fallbackJournal !== undefined) {
+      session = appendJournal(session, {
+        timestamp: now,
+        eventType: 'PROVIDER_FALLBACK_JOURNALED',
+        operatorSessionId: session.operatorSessionId,
+        nodeId: result.nodeId,
+        reasonCode: outcome.fallbackJournal.finalOutcome,
+        message: `Provider fallback journal recorded ${outcome.fallbackJournal.attempts.length} attempt event(s); final outcome ${outcome.fallbackJournal.finalOutcome}.`,
+      });
+    }
   }
 
   const withFolded: StoredOperatorSession = { ...record, session, activeAttempts: nextActiveAttempts, nodeResultRefs: nextNodeResultRefs };
@@ -750,6 +774,7 @@ export function completeExecutionBatch(
       session.artifacts,
       ids.next('gate'),
       now,
+      record.gates[0]?.riskSummary,
     );
     const awaiting: OperatorSession = {
       ...session,

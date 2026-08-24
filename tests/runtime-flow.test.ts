@@ -4,7 +4,11 @@ import { parseOperatorCommand } from '../src/commands.js';
 import { DeterministicMockAdapter, createDeterministicContextProjector } from '../src/mock.js';
 import { MemoryOperatorSessionStore } from '../src/store.js';
 import { createFrozenNodeExecutionAdapterResolver } from '../src/stage7/adapter-resolver.js';
-import type { NodeExecutionOutcome, StoredOperatorSession } from '../src/runtime-types.js';
+import type { NodeExecutionOutcome, OperatorIdFactory, OperatorSessionStore, StoredOperatorSession } from '../src/runtime-types.js';
+import type { OperatorWorkflowCompiler, WorkflowCompilerContext } from '../src/stage3-types.js';
+import type { ShadowRoutingPort } from '../src/shadow-routing.js';
+import { createProviderIntelligenceService, MemoryProviderIntelligenceStore } from '../src/provider-intelligence.js';
+import type { PolicySimulationPort } from '../src/policy-simulation.js';
 import {
   dispatchOneBatch,
   expectValidSession,
@@ -315,7 +319,7 @@ describe('OperatorRuntime optional-node degradation', () => {
     expect(degraded.outcome.session?.currentState).toBe('READY');
     expect(degraded.outcome.session?.nodeStates['optional-node']).toBe('FAILED');
     expect(degraded.outcome.session?.nodeStates['mandatory-synthesis']).toBe('READY');
-    expect(degraded.outcome.session?.journal.at(-1)?.eventType).toBe('EXECUTION_FAILED');
+    expect(degraded.outcome.session?.journal.slice(-2).map((entry) => entry.eventType)).toEqual(['EXECUTION_FAILED', 'FAILURE_FINGERPRINTED']);
 
     const completed = await dispatchOneBatch(runtime, sessionId, adapter);
     expect(completed.outcome.ok).toBe(true);
@@ -516,7 +520,7 @@ describe('OperatorRuntime invalid transitions and gate resolution', () => {
 describe('OperatorRuntime node execution failure paths', () => {
   test('a node returning FAILED produces NODE_EXECUTION_FAILED and ends the session FAILED', async () => {
     const adapter = new DeterministicMockAdapter(new FixedClock(), new SequentialIds(), { autoResolve: false });
-    const { runtime } = makeRuntime(adapter);
+    const { runtime, store } = makeRuntime(adapter);
     const started = await runtime.handle('do something risky');
     const gateId = started.gate?.gateId;
     const sessionId = started.operatorSessionId;
@@ -533,6 +537,9 @@ describe('OperatorRuntime node execution failure paths', () => {
     expect(outcome.session?.nodeStates['mock-read-node']).toBe('FAILED');
     if (outcome.session === undefined) throw new Error('expected session');
     expectValidSession(outcome.session);
+    const stored = await store.load(sessionId);
+    expect(stored?.nodeResultRefs['mock-read-node']?.failureFingerprint?.reasonCode).toBe('TEST_REGRESSION');
+    expect(stored?.session.journal.some((entry) => entry.eventType === 'FAILURE_FINGERPRINTED')).toBe(true);
   });
 
   test('completeBatch rejects a structurally valid AgentResult bound to another session, synthesizing a FAILED result instead', async () => {
@@ -940,6 +947,180 @@ describe('OperatorRuntime resume', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Side-effect-free simulation and decision evidence
+// ---------------------------------------------------------------------------
+
+describe('OperatorRuntime simulation', () => {
+  test('simulate and --dry-run share one pure compiler/preflight path', async () => {
+    let loadCalls = 0;
+    let saveCalls = 0;
+    let idCalls = 0;
+    let preflightCalls = 0;
+    let observedContext: WorkflowCompilerContext | undefined;
+    const store: OperatorSessionStore = {
+      async load() { loadCalls += 1; return undefined; },
+      async save() { saveCalls += 1; throw new Error('simulation must not save'); },
+    };
+    const ids: OperatorIdFactory = {
+      next() { idCalls += 1; throw new Error('simulation must not allocate shared ids'); },
+    };
+    const fixtureCompiler = new FakeCompiler();
+    const compiler: OperatorWorkflowCompiler = {
+      async compile(request, context) {
+        observedContext = context;
+        return fixtureCompiler.compile(request, context);
+      },
+    };
+    const adapter = new DeterministicMockAdapter(new FixedClock(), new SequentialIds(), { autoResolve: false });
+    const runtime = createOperatorRuntime({
+      store,
+      clock: new FixedClock(),
+      ids,
+      nodeExecutionAdapterResolver: createFrozenNodeExecutionAdapterResolver(adapter, true),
+      contextProjector: createDeterministicContextProjector(),
+      nodeTimeoutMs: () => 60_000,
+      compiler,
+      projectRoot: '/dev/null',
+      preflight: async () => { preflightCalls += 1; return { ok: true }; },
+    });
+
+    const simulated = await runtime.handle('simulate --family PLAN describe the rollout');
+    const aliased = await runtime.handle('--dry-run --family PLAN describe the rollout');
+
+    expect(simulated.ok).toBe(true);
+    expect(simulated.operatorSessionId).toBeUndefined();
+    expect(simulated.session).toBeUndefined();
+    expect(simulated.gate).toBeUndefined();
+    expect(simulated.simulation?.preflight).toBe('PASSED');
+    expect(simulated.simulation).toEqual(aliased.simulation);
+    expect(observedContext?.familyOverride).toBe('PLAN');
+    expect(loadCalls).toBe(0);
+    expect(saveCalls).toBe(0);
+    expect(idCalls).toBe(0);
+    expect(preflightCalls).toBe(2);
+  });
+
+  test('new sessions persist compiler disclosure and trace for why', async () => {
+    const { runtime, store } = makeRuntime();
+    const started = await runtime.handle('plan the rollout');
+    const sessionId = started.operatorSessionId;
+    if (sessionId === undefined) throw new Error('expected session id');
+    const stored = await store.load(sessionId);
+    expect(stored?.disclosureDecision?.disclosureClass).toBe('INTERNAL_REDACTABLE');
+    expect(stored?.decisionTrace?.entries.length).toBeGreaterThan(0);
+
+    const why = await runtime.handle('why');
+    expect(why.ok).toBe(true);
+    expect(why.text).toContain('Disclosure: INTERNAL_REDACTABLE');
+    expect(why.text).toContain('Decision trace:');
+  });
+});
+
+describe('OperatorRuntime shadow routing', () => {
+  test('controls shadow mode and evaluates without creating an active session', async () => {
+    let enabled = false;
+    let passiveCalls = 0;
+    const observation = {
+      schemaVersion: '1.0' as const,
+      observationId: 'a'.repeat(64),
+      requestHash: 'b'.repeat(64),
+      createdAt: FIXED_NOW,
+      primary: { family: 'DIRECT', workflow: 'mock.v1', providers: ['mock'] },
+      candidate: { status: 'DO_NOT_EXECUTE' as const, family: 'RESEARCH', disposition: 'DO_NOT_EXECUTE' as const, rawConfidence: 0.9, modelProvider: 'provider-a', modelId: 'model-a' },
+      divergences: ['TASK_FAMILY', 'DO_NOT_EXECUTE'],
+      policyRefs: ['mock@1:route.fixed'],
+    };
+    const shadowRouting: ShadowRoutingPort = {
+      setEnabled(value) { enabled = value; },
+      status() { return { enabled }; },
+      async evaluate() { return observation; },
+      async observeIfEnabled() { passiveCalls += 1; return enabled ? observation : undefined; },
+    };
+    const adapter = new DeterministicMockAdapter(new FixedClock(), new SequentialIds(), { autoResolve: false });
+    const runtime = createOperatorRuntime({
+      store: new MemoryOperatorSessionStore(),
+      clock: new FixedClock(),
+      ids: new SequentialIds(),
+      nodeExecutionAdapterResolver: createFrozenNodeExecutionAdapterResolver(adapter, true),
+      contextProjector: createDeterministicContextProjector(),
+      nodeTimeoutMs: () => 60_000,
+      compiler: new FakeCompiler(),
+      projectRoot: '/dev/null',
+      shadowRouting,
+    });
+
+    expect((await runtime.handle('shadow status')).text).toContain('disabled');
+    expect((await runtime.handle('shadow on')).ok).toBe(true);
+    expect(enabled).toBe(true);
+    const evaluated = await runtime.handle('shadow evaluate plan the rollout');
+    expect(evaluated.ok).toBe(true);
+    expect(evaluated.shadowObservation?.candidate.status).toBe('DO_NOT_EXECUTE');
+    expect(evaluated.operatorSessionId).toBeUndefined();
+    expect(evaluated.session).toBeUndefined();
+
+    const started = await runtime.handle('plan the rollout');
+    expect(started.ok).toBe(true);
+    expect(passiveCalls).toBe(1);
+    expect(started.session?.routeDecision?.selectedWorkflow).toBe('mock.v1');
+  });
+});
+
+describe('OperatorRuntime provider intelligence', () => {
+  test('records terminal outcomes and human gate signals without affecting execution', async () => {
+    const intelligence = createProviderIntelligenceService(new MemoryProviderIntelligenceStore());
+    const adapter = new DeterministicMockAdapter(new FixedClock(), new SequentialIds(), { autoResolve: false });
+    const runtime = createOperatorRuntime({
+      store: new MemoryOperatorSessionStore(),
+      clock: new FixedClock(),
+      ids: new SequentialIds(),
+      nodeExecutionAdapterResolver: createFrozenNodeExecutionAdapterResolver(adapter, true),
+      contextProjector: createDeterministicContextProjector(),
+      nodeTimeoutMs: () => 60_000,
+      compiler: new FakeCompiler(),
+      projectRoot: '/dev/null',
+      providerIntelligence: intelligence,
+    });
+    const started = await runtime.handle('plan the work');
+    const sessionId = started.operatorSessionId;
+    const gateId = started.gate?.gateId;
+    if (sessionId === undefined || gateId === undefined) throw new Error('expected session and gate');
+    await runtime.handle(`approve ${gateId}`);
+    const completed = await dispatchOneBatch(runtime, sessionId, adapter);
+    expect(completed.outcome.ok).toBe(true);
+    expect(await intelligence.status()).toEqual({ evidence: 1, admitted: 1, overrides: 1, canaries: 0 });
+    const status = await runtime.handle('competence status');
+    expect(status.ok).toBe(true);
+    expect(status.text).toContain('1/1 evidence records admitted');
+  });
+});
+
+describe('OperatorRuntime policy simulation', () => {
+  test('returns an ephemeral policy diff without session state', async () => {
+    const policySimulation: PolicySimulationPort = {
+      async test() {
+        return {
+          schemaVersion: '1.0', reportId: 'a'.repeat(64), proposedPolicyHash: 'b'.repeat(64),
+          current: { ok: true, workflow: 'current.v1' }, proposed: { ok: true, workflow: 'proposed.v1' },
+          changes: ['WORKFLOW'], unchangedHardInvariants: ['NO_AUTOMATIC_PUSH'], generatedAt: FIXED_NOW,
+        };
+      },
+    };
+    const adapter = new DeterministicMockAdapter(new FixedClock(), new SequentialIds(), { autoResolve: false });
+    const runtime = createOperatorRuntime({
+      store: new MemoryOperatorSessionStore(), clock: new FixedClock(), ids: new SequentialIds(),
+      nodeExecutionAdapterResolver: createFrozenNodeExecutionAdapterResolver(adapter, true),
+      contextProjector: createDeterministicContextProjector(), nodeTimeoutMs: () => 60_000,
+      compiler: new FakeCompiler(), projectRoot: '/dev/null', policySimulation,
+    });
+    const outcome = await runtime.handle('policy test --proposed .omp/proposed.json compare this');
+    expect(outcome.ok).toBe(true);
+    expect(outcome.policyDiff?.changes).toEqual(['WORKFLOW']);
+    expect(outcome.operatorSessionId).toBeUndefined();
+    expect(outcome.session).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Command parsing
 // ---------------------------------------------------------------------------
 
@@ -952,6 +1133,83 @@ describe('parseOperatorCommand', () => {
   test('parses --explain <request> as START/EXPLAIN', () => {
     const result = parseOperatorCommand('--explain fix the bug');
     expect(result).toEqual({ kind: 'START', request: 'fix the bug', mode: 'EXPLAIN' });
+  });
+
+  test('parses simulate and --dry-run as the same command', () => {
+    expect(parseOperatorCommand('simulate --family PLAN describe the rollout')).toEqual({
+      kind: 'SIMULATE',
+      request: 'describe the rollout',
+      familyOverride: 'PLAN',
+    });
+    expect(parseOperatorCommand('--dry-run --family PLAN describe the rollout')).toEqual({
+      kind: 'SIMULATE',
+      request: 'describe the rollout',
+      familyOverride: 'PLAN',
+    });
+    expect(parseOperatorCommand('simulate --fleet --family PLAN describe the rollout')).toEqual({
+      kind: 'SIMULATE',
+      request: '--fleet describe the rollout',
+      familyOverride: 'PLAN',
+    });
+  });
+
+  test('parses and bounds explicit family selection', () => {
+    expect(parseOperatorCommand('--family SECURITY inspect the endpoint')).toEqual({
+      kind: 'START',
+      mode: 'EXECUTE',
+      request: 'inspect the endpoint',
+      familyOverride: 'SECURITY',
+    });
+    expect(parseOperatorCommand('--fleet --family SECURITY inspect the endpoint')).toEqual({
+      kind: 'START',
+      mode: 'EXECUTE',
+      request: '--fleet inspect the endpoint',
+      familyOverride: 'SECURITY',
+    });
+    expect(parseOperatorCommand('--family SECURITY --fleet inspect the endpoint')).toEqual({
+      kind: 'START',
+      mode: 'EXECUTE',
+      request: '--fleet inspect the endpoint',
+      familyOverride: 'SECURITY',
+    });
+    expect(parseOperatorCommand('--family DIRECT bypass this').kind).toBe('PARSE_ERROR');
+    expect(parseOperatorCommand('--family UNKNOWN do this').kind).toBe('PARSE_ERROR');
+  });
+
+  test('parses shadow control and one-shot evaluation commands', () => {
+    expect(parseOperatorCommand('shadow on')).toEqual({ kind: 'SHADOW', subcommand: 'ON' });
+    expect(parseOperatorCommand('shadow off')).toEqual({ kind: 'SHADOW', subcommand: 'OFF' });
+    expect(parseOperatorCommand('shadow status')).toEqual({ kind: 'SHADOW', subcommand: 'STATUS' });
+    expect(parseOperatorCommand('shadow evaluate --family PLAN compare this')).toEqual({
+      kind: 'SHADOW',
+      subcommand: 'EVALUATE',
+      request: 'compare this',
+      familyOverride: 'PLAN',
+    });
+    expect(parseOperatorCommand('shadow evaluate').kind).toBe('PARSE_ERROR');
+  });
+
+  test('parses competence inspection commands', () => {
+    expect(parseOperatorCommand('competence status')).toEqual({ kind: 'COMPETENCE', subcommand: 'STATUS' });
+    expect(parseOperatorCommand('competence show provider-a')).toEqual({ kind: 'COMPETENCE', subcommand: 'SHOW', providerId: 'provider-a' });
+    expect(parseOperatorCommand('competence show provider-a model-a')).toEqual({ kind: 'COMPETENCE', subcommand: 'SHOW', providerId: 'provider-a', modelId: 'model-a' });
+    expect(parseOperatorCommand('competence show').kind).toBe('PARSE_ERROR');
+  });
+
+  test('parses policy test without applying a proposal', () => {
+    expect(parseOperatorCommand('policy test --proposed .omp/proposed.json --family PLAN compare this')).toEqual({
+      kind: 'POLICY_TEST',
+      proposedPath: '.omp/proposed.json',
+      request: 'compare this',
+      familyOverride: 'PLAN',
+    });
+    expect(parseOperatorCommand('policy test compare this').kind).toBe('PARSE_ERROR');
+  });
+
+  test('parses bounded provider canary commands', () => {
+    expect(parseOperatorCommand('canary run provider-a')).toEqual({ kind: 'CANARY', providerId: 'provider-a' });
+    expect(parseOperatorCommand('canary run provider-a model-a')).toEqual({ kind: 'CANARY', providerId: 'provider-a', modelId: 'model-a' });
+    expect(parseOperatorCommand('canary run').kind).toBe('PARSE_ERROR');
   });
 
   test('rejects --explain with no request', () => {

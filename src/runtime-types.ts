@@ -4,19 +4,28 @@ import type {
   FindingEffectiveDisposition,
   ArtifactManifest,
   Evidence,
+  ExecutionGraph,
   ExecutionGraphNode,
   HumanGate,
   MutationClass,
   OperatorSession,
   PolicyRef,
+  RouteDecision,
+  TaskFamily,
 } from './contracts.js';
-import type { CompiledWorkflow, OperatorWorkflowCompiler, WorkflowCompilerContext } from './stage3-types.js';
+import type { ClassificationProposal, CompiledCapabilitySummary, CompiledWorkflow, OperatorWorkflowCompiler, WorkflowCompilerContext } from './stage3-types.js';
+import type { DecisionTrace, RuntimeDisclosureDecision } from './intelligence.js';
+import type { ShadowObservation, ShadowRoutingPort } from './shadow-routing.js';
+import type { FailureFingerprint, ProviderFallbackJournal } from './execution-safety.js';
+import type { ProviderIntelligencePort } from './provider-intelligence.js';
+import type { ExecutionEstimate, PolicyDiffReport, PolicySimulationPort } from './policy-simulation.js';
+import type { ProviderCanaryCommandPort } from './intelligence-activation.js';
 
-/** V1 `/operator` commands implemented by the runtime. `DRY_RUN` performs
- * every non-dispatching preflight check (Stage 4 §6.1) and never opens a
- * gate or creates a provider session. */
+/** Typed `/operator` commands implemented by the runtime. Simulation is a
+ * distinct command so it can never enter the session persistence path. */
 export type OperatorCommand =
-  | { readonly kind: 'START'; readonly request: string; readonly mode: 'EXECUTE' | 'EXPLAIN' | 'DRY_RUN' }
+  | { readonly kind: 'START'; readonly request: string; readonly mode: 'EXECUTE' | 'EXPLAIN'; readonly familyOverride?: Exclude<TaskFamily, 'DIRECT'> }
+  | { readonly kind: 'SIMULATE'; readonly request: string; readonly familyOverride?: Exclude<TaskFamily, 'DIRECT'> }
   | { readonly kind: 'EXPLAIN' }
   | { readonly kind: 'WHY' }
   | { readonly kind: 'STATUS' }
@@ -27,6 +36,10 @@ export type OperatorCommand =
   | { readonly kind: 'CANCEL' }
   | { readonly kind: 'RESUME'; readonly operatorSessionId: string }
   | { readonly kind: 'IMPROVE'; readonly subcommand: string; readonly args: readonly string[] }
+  | { readonly kind: 'POLICY_TEST'; readonly proposedPath: string; readonly request: string; readonly familyOverride?: Exclude<TaskFamily, 'DIRECT'> }
+  | { readonly kind: 'CANARY'; readonly providerId: string; readonly modelId?: string }
+  | { readonly kind: 'COMPETENCE'; readonly subcommand: 'STATUS' | 'SHOW'; readonly providerId?: string; readonly modelId?: string }
+  | { readonly kind: 'SHADOW'; readonly subcommand: 'ON' | 'OFF' | 'STATUS' | 'EVALUATE'; readonly request?: string; readonly familyOverride?: Exclude<TaskFamily, 'DIRECT'> }
   | { readonly kind: 'FLEET'; readonly subcommand: string; readonly args: readonly string[] };
 
 export type OperatorCommandErrorCode =
@@ -56,13 +69,30 @@ export type OperatorCommandErrorCode =
   | 'FEATURE_DISABLED'
   | 'EVALUATOR_ERROR';
 
+export interface SimulationResultEnvelope {
+  readonly schemaVersion: '1.0';
+  readonly request: string;
+  readonly generatedAt: string;
+  readonly classification: ClassificationProposal;
+  readonly disclosureDecision: RuntimeDisclosureDecision;
+  readonly routeDecision: RouteDecision;
+  readonly executionGraph: ExecutionGraph;
+  readonly executionEstimate: ExecutionEstimate;
+  readonly capabilities: readonly CompiledCapabilitySummary[];
+  readonly decisionTrace: DecisionTrace;
+  readonly preflight: 'PASSED' | 'NOT_CONFIGURED';
+}
+
 export interface OperatorCommandOutcome {
   readonly ok: boolean;
   readonly text: string;
   readonly errorCode?: OperatorCommandErrorCode;
   readonly operatorSessionId?: string;
   readonly session?: OperatorSession;
+  readonly policyDiff?: PolicyDiffReport;
   readonly gate?: HumanGate;
+  readonly simulation?: SimulationResultEnvelope;
+  readonly shadowObservation?: ShadowObservation;
 }
 
 // ---------------------------------------------------------------------------
@@ -175,6 +205,8 @@ export interface NodeExecutionOutcome {
   readonly attempt: NodeExecutionAttempt;
   readonly result: AgentResult;
   readonly usage?: NodeExecutionUsage;
+  readonly failureFingerprint?: FailureFingerprint;
+  readonly fallbackJournal?: ProviderFallbackJournal;
 }
 
 /** An in-flight, extension-owned execution handle. `launchBatch` starts
@@ -211,7 +243,7 @@ export interface ActiveBatchRegistration {
 }
 export type ActiveBatchRegistrar = (registration: ActiveBatchRegistration) => void;
 
-/** Non-dispatching preflight for `DRY_RUN` beyond what `compiler.compile`
+/** Non-dispatching preflight for `SIMULATE` beyond what `compiler.compile`
  * already validates: adapter availability, exact model availability,
  * package role path/hash, tool-grant/context-projection validity, output
  * schema availability, filesystem permissions. Omit in tests/mock-only
@@ -229,6 +261,9 @@ export interface StoredOperatorSession {
   readonly schemaVersion: '1.0';
   /** Present for sessions started under Stage-7 startup configuration. */
   readonly startupFeatureSetHash?: string;
+  /** WP12 runtime intelligence evidence. Absent on legacy sessions. */
+  readonly disclosureDecision?: RuntimeDisclosureDecision;
+  readonly decisionTrace?: DecisionTrace;
   readonly session: OperatorSession;
   readonly gates: readonly HumanGate[];
   /** Resolved once at START from `ResolvedPolicy.maxConcurrency`; the upper
@@ -255,6 +290,8 @@ export interface NodeResultRefs {
   readonly modelProvider: string;
   readonly modelId: string;
   readonly startedAt: string;
+  readonly failureFingerprint?: FailureFingerprint;
+  readonly fallbackJournal?: ProviderFallbackJournal;
   readonly completedAt: string;
   readonly usage?: NodeExecutionUsage;
 }
@@ -307,6 +344,14 @@ export interface OperatorRuntimeDependencies {
    * `FEATURE_DISABLED`. The active runtime never imports evaluator
    * implementation modules; the handler is injected by the extension. */
   readonly evaluatorHandler?: (subcommand: string, args: readonly string[]) => Promise<OperatorCommandOutcome>;
+  /** Optional WP13 semantic shadow-routing service. Omit to fail closed. */
+  readonly shadowRouting?: ShadowRoutingPort;
+  /** Optional WP15 evidence/scorecard service. It has no routing authority. */
+  readonly providerIntelligence?: ProviderIntelligencePort;
+  /** Optional WP16 policy-diff service. It never applies proposed policy. */
+  readonly policySimulation?: PolicySimulationPort;
+  /** Optional WP18 fixed-corpus canary runner. */
+  readonly providerCanary?: ProviderCanaryCommandPort;
   /** Passed as `WorkflowCompilerContext.projectRoot` on every `compile()`
    * call: the project directory this runtime instance operates against
    * (config/trust resolution root). */

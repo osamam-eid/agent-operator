@@ -129,6 +129,27 @@
       "minItems": 0,
       "uniqueItems": true
     },
+    "riskSummary": {
+      "type": "object",
+      "description": "Structured graph-bound risk information; it never changes gate authority.",
+      "additionalProperties": false,
+      "required": ["riskLevel", "disclosureClass", "mutationClasses", "providers", "tools", "scopedNodes", "actionsNotPerformed", "recoveryRequired", "expectedProviderCalls", "maximumDepth", "estimatedCost", "costConfidence", "previewReasons"],
+      "properties": {
+        "riskLevel": { "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+        "disclosureClass": { "enum": ["LOCAL_ONLY", "INTERNAL_REDACTABLE", "EXTERNAL_ALLOWED"] },
+        "mutationClasses": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["READ_ONLY", "LOCAL", "EXTERNAL", "DESTRUCTIVE"] } },
+        "providers": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 200 } },
+        "tools": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 200 } },
+        "scopedNodes": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/NodeIdRef" } },
+        "actionsNotPerformed": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 1000 } },
+        "recoveryRequired": { "type": "boolean" },
+        "expectedProviderCalls": { "type": "integer", "minimum": 0 },
+        "maximumDepth": { "type": "integer", "minimum": 0 },
+        "estimatedCost": { "type": ["number", "null"], "minimum": 0 },
+        "costConfidence": { "enum": ["UNAVAILABLE", "LOW", "MEDIUM", "HIGH"] },
+        "previewReasons": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" } }
+      }
+    },
     "createdAt": {
       "type": "string",
       "format": "date-time",

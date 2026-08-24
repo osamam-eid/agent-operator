@@ -18,6 +18,7 @@ import type {
   ExecutionGraph,
   FinalOperatorResult,
   HumanDecisionRecord,
+  GateRiskSummary,
   HumanGate,
   JournalEntry,
   NodeState,
@@ -100,7 +101,30 @@ const HUMAN_GATE_KEYS = [
   'createdAt',
   'expiresAt',
   'status',
+  'riskSummary',
 ] as const;
+
+const GATE_RISK_SUMMARY_KEYS = ['riskLevel', 'disclosureClass', 'mutationClasses', 'providers', 'tools', 'scopedNodes', 'actionsNotPerformed', 'recoveryRequired', 'expectedProviderCalls', 'maximumDepth', 'estimatedCost', 'costConfidence', 'previewReasons'] as const;
+
+function validateGateRiskSummary(ctx: Ctx, path: Path, value: unknown): GateRiskSummary | undefined {
+  const raw = checkObjectShape(ctx, path, value, GATE_RISK_SUMMARY_KEYS);
+  if (!raw) return undefined;
+  const riskLevel = requireEnum(ctx, [...path, 'riskLevel'], raw.riskLevel, ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const);
+  const disclosureClass = requireEnum(ctx, [...path, 'disclosureClass'], raw.disclosureClass, ['LOCAL_ONLY', 'INTERNAL_REDACTABLE', 'EXTERNAL_ALLOWED'] as const);
+  const mutationClasses = requireStringArray(ctx, [...path, 'mutationClasses'], raw.mutationClasses, { minItems: 1, unique: true, itemValidator: (c, p, v) => requireEnum(c, p, v, ['READ_ONLY', 'LOCAL', 'EXTERNAL', 'DESTRUCTIVE'] as const) });
+  const providers = requireStringArray(ctx, [...path, 'providers'], raw.providers, { unique: true, itemValidator: (c, p, v) => requireExactString(c, p, v, { maxLen: MAX_SHORT_TEXT }) });
+  const tools = requireStringArray(ctx, [...path, 'tools'], raw.tools, { unique: true, itemValidator: (c, p, v) => requireExactString(c, p, v, { maxLen: MAX_SHORT_TEXT }) });
+  const scopedNodes = requireStringArray(ctx, [...path, 'scopedNodes'], raw.scopedNodes, { minItems: 1, unique: true, itemValidator: requireId });
+  const actionsNotPerformed = requireStringArray(ctx, [...path, 'actionsNotPerformed'], raw.actionsNotPerformed, { minItems: 1, unique: true, itemValidator: (c, p, v) => requireHumanText(c, p, v, { maxLen: MAX_MEDIUM_TEXT }) });
+  const recoveryRequired = requireBoolean(ctx, [...path, 'recoveryRequired'], raw.recoveryRequired);
+  const expectedProviderCalls = requireNumber(ctx, [...path, 'expectedProviderCalls'], raw.expectedProviderCalls, { min: 0, integer: true });
+  const maximumDepth = requireNumber(ctx, [...path, 'maximumDepth'], raw.maximumDepth, { min: 0, integer: true });
+  const estimatedCost = raw.estimatedCost === null ? null : requireNumber(ctx, [...path, 'estimatedCost'], raw.estimatedCost, { min: 0 });
+  const costConfidence = requireEnum(ctx, [...path, 'costConfidence'], raw.costConfidence, ['UNAVAILABLE', 'LOW', 'MEDIUM', 'HIGH'] as const);
+  const previewReasons = requireStringArray(ctx, [...path, 'previewReasons'], raw.previewReasons, { unique: true, itemValidator: (c, p, v) => requireExactString(c, p, v, { maxLen: MAX_SHORT_TEXT, pattern: REASON_CODE_PATTERN }) });
+  if (riskLevel === undefined || disclosureClass === undefined || mutationClasses === undefined || providers === undefined || tools === undefined || scopedNodes === undefined || actionsNotPerformed === undefined || recoveryRequired === undefined || expectedProviderCalls === undefined || maximumDepth === undefined || estimatedCost === undefined || costConfidence === undefined || previewReasons === undefined) return undefined;
+  return { riskLevel, disclosureClass, mutationClasses: mutationClasses as GateRiskSummary['mutationClasses'], providers, tools, scopedNodes, actionsNotPerformed, recoveryRequired, expectedProviderCalls, maximumDepth, estimatedCost, costConfidence, previewReasons };
+}
 
 export function validateHumanGate(input: unknown): ValidationResult<HumanGate> {
   const ctx = newCtx();
@@ -149,6 +173,7 @@ export function validateHumanGate(input: unknown): ValidationResult<HumanGate> {
   let expiresAt: string | undefined;
   if (hasOwn(raw, 'expiresAt')) expiresAt = requireTimestamp(ctx, ['expiresAt'], raw.expiresAt);
   const status = requireEnum(ctx, ['status'], raw.status, GATE_STATUSES);
+  const riskSummary = hasOwn(raw, 'riskSummary') ? validateGateRiskSummary(ctx, ['riskSummary'], raw.riskSummary) : undefined;
 
   // Cross-field: the gate binds session/gate/graph/hash together and states
   // exactly what the human is deciding (plan section 9).
@@ -198,6 +223,7 @@ export function validateHumanGate(input: unknown): ValidationResult<HumanGate> {
     return finalize(ctx, out);
   }
   if (hasOwn(raw, 'expiresAt') && expiresAt === undefined) return finalize(ctx, out);
+  if (hasOwn(raw, 'riskSummary') && riskSummary === undefined) return finalize(ctx, out);
 
   out.gateId = gateId;
   out.operatorSessionId = operatorSessionId;
@@ -214,6 +240,7 @@ export function validateHumanGate(input: unknown): ValidationResult<HumanGate> {
   out.artifactRefs = artifactRefs;
   out.artifactHashes = artifactHashes;
   out.policyRefs = policyRefs;
+  if (riskSummary !== undefined) out.riskSummary = riskSummary;
   out.createdAt = createdAt;
   if (expiresAt !== undefined) out.expiresAt = expiresAt;
   out.status = status;
