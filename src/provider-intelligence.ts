@@ -289,6 +289,29 @@ export function createProviderIntelligenceService(store: ProviderIntelligenceSto
     },
     async recordCanary(observation): Promise<void> {
       await store.append(observation.canaryId, { kind: 'CANARY', observation });
+      // Derive an admitted evidence record so fixed qualification cases feed
+      // competence snapshots. Provenance stays CANARY; one run can never
+      // establish high confidence (Wilson interval + sample floor handle it).
+      const evidenceId = digest([observation.canaryId, 'evidence']);
+      const derived: ProviderEvidenceObservation = {
+        schemaVersion: '1.0',
+        evidenceId,
+        source: 'CANARY',
+        sourceRef: `${observation.canaryId}:${observation.caseId}`,
+        providerId: observation.providerId,
+        modelId: observation.modelId,
+        role: 'qualification-canary',
+        taskFamily: observation.taskFamily,
+        capabilityId: observation.capabilityId,
+        outcome: observation.outcome === 'PASSED' ? 'SUCCEEDED' : 'FAILED',
+        verified: true,
+        unresolvedMutation: false,
+        qualityScore: observation.qualityScore,
+        durationMs: observation.latencyMs,
+        observedAt: observation.observedAt,
+        policyRefs: [],
+      };
+      await store.append(evidenceId, { kind: 'EVIDENCE', observation: derived, admission: admissionFor(derived, true) });
     },
     async scorecards(providerId, modelId): Promise<readonly ProviderCompetenceSnapshot[]> {
       const evidence = (await store.list()).flatMap((record) => record.kind === 'EVIDENCE' && record.admission.admitted ? [record.observation] : []);
